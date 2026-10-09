@@ -11,6 +11,10 @@ see who needs to be looked at next, backed by the numbers already in front of he
 
 Theme: **Symptom-based priority scoring** · Protocol: **South African Triage Scale (SATS) Adult / TEWS**
 
+![TriageFlow Lite — the nurse workspace: the waiting queue sorted by urgency, the agent's live tool calls across both MCP servers, and a RED priority with every point cited to the SATS chart.](docs/img/screenshot.jpg)
+
+<p align="center"><sub>The nurse workspace — intake, the agent's live tool-call trace (own + borrowed MCP), and a sourced priority awaiting clinician confirmation.</sub></p>
+
 ---
 
 ## Run it (one command)
