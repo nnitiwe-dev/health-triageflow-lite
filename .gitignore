@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# venv / uv
+.venv/
+venv/
+.python-version
+
+# runtime data (audit logs, sqlite) — never commit patient-adjacent data
+.triageflow/
+*.db
+*.jsonl
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# test / cache
+.pytest_cache/
+.ruff_cache/

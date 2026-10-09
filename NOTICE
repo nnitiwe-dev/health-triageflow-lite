@@ -1,0 +1,32 @@
+TriageFlow Lite
+Copyright 2026 TriageFlow Lite contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+------------------------------------------------------------------------------
+Clinical content attribution
+------------------------------------------------------------------------------
+The adult triage thresholds and discriminators implemented in
+`src/triageflow/core/sats_rules.py` and summarised in `protocols/sats_adult.md`
+are a fact-based re-encoding of the South African Triage Scale (SATS), Adult
+pathway, from:
+
+    SATS Training Manual 2012
+    South African Triage Group (SATG) / Emergency Medicine Society of South
+    Africa (EMSSA), with the Western Cape Government: Health.
+
+SATS materials are published under Creative Commons Attribution-NonCommercial-
+ShareAlike 3.0 (CC BY-NC-SA 3.0). This project redistributes only a re-encoded
+rule table (clinical facts and thresholds) with attribution; it does NOT
+redistribute the SATS charts, posters, or manual text. Credit: South African
+Triage Group, SATS Training Manual 2012.
+
+This software is NOT a medical device and NOT affiliated with or endorsed by
+SATG / EMSSA. The thresholds must be clinically reviewed before any real use.
+
+------------------------------------------------------------------------------
+Coding systems
+------------------------------------------------------------------------------
+Synthetic FHIR resources use LOINC codes for vital signs. LOINC is a registered
+trademark of Regenstrief Institute, Inc. No SNOMED CT content is included or
+redistributed.

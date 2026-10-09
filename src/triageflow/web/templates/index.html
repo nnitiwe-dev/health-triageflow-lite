@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TriageFlow Lite</title>
+  <script src="https://cdn.tailwindcss.com/3.4.13"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+      colors: { ink: '#0a0a0a', subtle: '#6b7280', line: '#ededed' } } } };
+  </script>
+</head>
+<body class="bg-white text-ink font-sans antialiased">
+  <!-- Top bar -->
+  <header class="sticky top-0 z-20 bg-white/80 backdrop-blur border-b border-line">
+    <div class="max-w-[1400px] mx-auto px-5 h-14 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2.5">
+        <div class="h-6 w-6 rounded-md bg-ink flex items-center justify-center">
+          <span class="text-white text-[13px] font-bold">T</span>
+        </div>
+        <div class="leading-tight">
+          <div class="font-semibold text-[15px]">TriageFlow <span class="text-subtle font-normal">Lite</span></div>
+          <div class="text-[11px] text-subtle -mt-0.5">SATS-sourced priority · nurse-confirmed</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-[11px]">
+        <span id="chip-model" class="chip">model: {{ model }}{% if using_fallback %} (fallback){% endif %}</span>
+        <span class="chip">data: {{ data_region }}</span>
+        <span class="chip hidden sm:inline">MCP: {{ servers|join(' + ') }}</span>
+        <span class="chip chip-warn">⚠ not a diagnosis</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Model-not-ready banner -->
+  <div id="model-banner" class="hidden bg-amber-50 border-b border-amber-200">
+    <div class="max-w-[1400px] mx-auto px-5 py-2.5 flex items-center justify-between gap-3 text-[13px]">
+      <span class="text-amber-800">Open-weights model not downloaded. The agent runs deterministically; download Qwen for the LLM narration + extraction.</span>
+      <div class="flex gap-2 shrink-0">
+        <button id="btn-pull" class="btn-sm bg-ink text-white">Download model</button>
+        <button id="btn-repair" class="btn-sm border border-amber-300 text-amber-800">Clear &amp; re-download</button>
+      </div>
+    </div>
+    <div id="pull-progress" class="hidden max-w-[1400px] mx-auto px-5 pb-2 text-[12px] text-subtle font-mono"></div>
+  </div>
+
+  <main class="max-w-[1400px] mx-auto px-5 py-5">
+    <!-- Queue strip -->
+    <section class="mb-5">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-[12px] font-semibold uppercase tracking-wide text-subtle">Waiting queue · sorted by urgency</h2>
+        <button id="btn-refresh-queue" class="text-[12px] text-subtle hover:text-ink">↻ regenerate</button>
+      </div>
+      <div id="queue" class="flex gap-2 overflow-x-auto pb-1"></div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <!-- Panel 1: intake -->
+      <section class="card">
+        <div class="card-h">1 · Patient intake</div>
+        <div class="p-4 space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <label class="field"><span>Encounter</span><input id="f-id" readonly class="bg-gray-50"/></label>
+            <label class="field"><span>Age</span><input id="f-age" type="number" placeholder="e.g. 54"/></label>
+          </div>
+          <label class="field"><span>Presenting complaint</span>
+            <textarea id="f-complaint" rows="2" placeholder="e.g. central chest pain radiating to left arm"></textarea></label>
+          <div class="grid grid-cols-3 gap-3">
+            <label class="field"><span>Resp. rate</span><input id="f-rr" type="number" placeholder="/min"/></label>
+            <label class="field"><span>Heart rate</span><input id="f-hr" type="number" placeholder="bpm"/></label>
+            <label class="field"><span>Systolic BP</span><input id="f-sbp" type="number" placeholder="mmHg"/></label>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <label class="field"><span>Temp °C</span><input id="f-temp" type="number" step="0.1" placeholder="37.0"/></label>
+            <label class="field"><span>SpO₂ %</span><input id="f-spo2" type="number" placeholder="opt"/></label>
+            <label class="field"><span>Glucose</span><input id="f-glucose" type="number" step="0.1" placeholder="mmol/L"/></label>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <label class="field"><span>AVPU</span>
+              <select id="f-avpu"><option value="">—</option><option>alert</option><option>voice</option><option>confused</option><option>pain</option><option>unresponsive</option></select></label>
+            <label class="field"><span>Mobility</span>
+              <select id="f-mobility"><option value="">—</option><option value="walking">walking</option><option value="with_help">with help</option><option value="immobile">immobile</option></select></label>
+            <label class="field justify-end"><span>Trauma</span>
+              <label class="inline-flex items-center gap-2 h-[38px]"><input id="f-trauma" type="checkbox" class="h-4 w-4"/><span class="text-[13px] text-subtle">yes</span></label></label>
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button id="btn-synthetic" class="btn border border-line">Load synthetic</button>
+            <button id="btn-assess" class="btn bg-ink text-white flex-1">Assess priority →</button>
+          </div>
+          <p class="text-[11px] text-subtle">Synthetic data only. The agent scores &amp; sequences; it never diagnoses, prescribes, or moves a patient.</p>
+        </div>
+      </section>
+
+      <!-- Panel 2: agent activity -->
+      <section class="card">
+        <div class="card-h">2 · Agent activity <span id="agent-spin" class="hidden ml-2 text-subtle">running…</span></div>
+        <div class="p-4">
+          <ol id="trace" class="space-y-2 text-[13px]"></ol>
+          <div id="candidates-wrap" class="hidden mt-4 pt-3 border-t border-line">
+            <div class="text-[12px] font-semibold text-subtle mb-2">Candidate signs — confirm before they count</div>
+            <div id="candidates" class="space-y-1.5"></div>
+            <button id="btn-rescore" class="hidden btn-sm bg-ink text-white mt-3">Re-score with confirmed signs</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel 3: proposal + approval -->
+      <section class="card">
+        <div class="card-h">3 · Proposed priority <span class="text-subtle font-normal">· clinician confirms</span></div>
+        <div class="p-4">
+          <div id="empty-proposal" class="text-[13px] text-subtle py-8 text-center">Run an assessment to see a sourced priority here.</div>
+          <div id="proposal" class="hidden space-y-4">
+            <div id="band" class="rounded-lg p-4 text-white">
+              <div class="flex items-baseline justify-between">
+                <div id="band-label" class="text-2xl font-bold"></div>
+                <div id="band-time" class="text-[13px] opacity-90"></div>
+              </div>
+              <div id="band-disp" class="text-[12px] opacity-90 mt-0.5"></div>
+            </div>
+            <div id="explanation" class="text-[13px] leading-relaxed bg-gray-50 rounded-md p-3"></div>
+            <div id="deterioration" class="hidden text-[13px] rounded-md p-3 border border-orange-200 bg-orange-50 text-orange-900"></div>
+            <div>
+              <div class="text-[12px] font-semibold text-subtle mb-1.5">Evidence · every point sourced</div>
+              <ul id="evidence" class="space-y-1.5 text-[12px]"></ul>
+            </div>
+            <div id="verification" class="flex gap-2 text-[11px]"></div>
+
+            <!-- approval gate -->
+            <div class="pt-3 border-t border-line space-y-2.5">
+              <div class="text-[12px] font-semibold">Clinician approval gate</div>
+              <input id="a-name" placeholder="Approving clinician name" class="w-full"/>
+              <div class="flex items-center gap-2">
+                <select id="a-override" class="flex-1"><option value="">Approve as proposed</option>
+                  <option value="RED">Override → RED</option><option value="ORANGE">Override → ORANGE</option>
+                  <option value="YELLOW">Override → YELLOW</option><option value="GREEN">Override → GREEN</option></select>
+              </div>
+              <input id="a-reason" placeholder="Reason (required for override)" class="w-full"/>
+              <button id="btn-approve" class="btn bg-ink text-white w-full">Confirm priority &amp; place in queue</button>
+            </div>
+            <div id="confirmed" class="hidden rounded-md p-3 bg-green-50 border border-green-200 text-green-900 text-[13px]"></div>
+            <button id="btn-audit" class="hidden text-[12px] text-subtle hover:text-ink underline">view audit trail</button>
+            <pre id="audit" class="hidden mt-2 text-[11px] bg-gray-50 rounded-md p-3 overflow-x-auto"></pre>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
