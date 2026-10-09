@@ -17,7 +17,9 @@ class Settings:
     # Open-weights model served locally by Ollama (data never leaves the machine).
     model: str = field(default_factory=lambda: _env("TRIAGEFLOW_MODEL", "qwen2.5:7b-instruct"))
     fallback_model: str = field(default_factory=lambda: _env("TRIAGEFLOW_FALLBACK_MODEL", "llama3.2:3b"))
-    ollama_host: str = field(default_factory=lambda: _env("OLLAMA_HOST", "http://localhost:11434"))
+    # Use 127.0.0.1 (not "localhost"): the Ollama app binds IPv4 only, and "localhost" can
+    # resolve to IPv6 (::1) first, which makes the server look unreachable.
+    ollama_host: str = field(default_factory=lambda: _env("OLLAMA_HOST", "http://127.0.0.1:11434"))
 
     # Data residency guard — recorded in the audit log and shown in the UI.
     data_region: str = field(default_factory=lambda: _env("TRIAGEFLOW_DATA_REGION", "local-only"))

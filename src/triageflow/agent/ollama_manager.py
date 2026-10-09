@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -64,14 +65,26 @@ def _model_present(name: str, available: list[str]) -> bool:
     return any(m == name or m.split(":")[0] == base for m in available)
 
 
-def start_server(wait_s: float = 20.0) -> bool:
-    """Start `ollama serve` in the background if it is not already up."""
+def start_server(wait_s: float = 25.0) -> bool:
+    """Make the Ollama server reachable, if it is not already.
+
+    On macOS we prefer launching the Ollama.app (it manages a persistent server and owns
+    the port), which avoids a stray `ollama serve` fighting the app over port 11434. We
+    fall back to `ollama serve` elsewhere, or if the app is not installed.
+    """
     if server_up():
         return True
-    if not _binary():
-        return False
-    subprocess.Popen([_binary(), "serve"], stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL)
+    started = False
+    app_path = Path("/Applications/Ollama.app")
+    if sys.platform == "darwin" and app_path.exists():
+        subprocess.run(["open", "-a", "Ollama"], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=False)
+        started = True
+    if not started:
+        if not _binary():
+            return False
+        subprocess.Popen([_binary(), "serve"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if server_up():
