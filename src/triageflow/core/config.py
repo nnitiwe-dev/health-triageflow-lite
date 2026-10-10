@@ -6,10 +6,32 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
+
+
+def _normalize_ollama_host(raw: str) -> str:
+    """Turn any OLLAMA_HOST value into a valid client URL.
+
+    Ollama's own CLI accepts a bare host (e.g. ``0.0.0.0`` or ``127.0.0.1:11434``) with no
+    scheme, and ``0.0.0.0`` is a *listen* address, not a *connect* one. httpx needs a full
+    URL and a real host — so add http:// if missing, map 0.0.0.0/localhost to 127.0.0.1, and
+    default the port to 11434. A genuine remote host is left as-is.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return "http://127.0.0.1:11434"
+    if "://" not in raw:
+        raw = "http://" + raw
+    u = urlparse(raw)
+    host = (u.hostname or "127.0.0.1")
+    if host in ("0.0.0.0", "localhost", "::", "[::]"):
+        host = "127.0.0.1"
+    port = u.port or 11434
+    return f"{u.scheme or 'http'}://{host}:{port}"
 
 
 @dataclass
@@ -18,8 +40,9 @@ class Settings:
     model: str = field(default_factory=lambda: _env("TRIAGEFLOW_MODEL", "qwen2.5:7b-instruct"))
     fallback_model: str = field(default_factory=lambda: _env("TRIAGEFLOW_FALLBACK_MODEL", "llama3.2:3b"))
     # Use 127.0.0.1 (not "localhost"): the Ollama app binds IPv4 only, and "localhost" can
-    # resolve to IPv6 (::1) first, which makes the server look unreachable.
-    ollama_host: str = field(default_factory=lambda: _env("OLLAMA_HOST", "http://127.0.0.1:11434"))
+    # resolve to IPv6 (::1) first. Normalised so a bare/0.0.0.0 OLLAMA_HOST still works.
+    ollama_host: str = field(default_factory=lambda: _normalize_ollama_host(
+        _env("OLLAMA_HOST", "http://127.0.0.1:11434")))
 
     # Data residency guard — recorded in the audit log and shown in the UI.
     data_region: str = field(default_factory=lambda: _env("TRIAGEFLOW_DATA_REGION", "local-only"))
