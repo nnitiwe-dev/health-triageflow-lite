@@ -175,6 +175,23 @@ async def queue_demo(n: int = 6, seed: int = 42):
     return out
 
 
+@app.get("/api/synthetic")
+async def synthetic_one():
+    """One synthetic patient of a RANDOM acuity (so 'Load synthetic' isn't always green)."""
+    import random as _r
+    # Weighted toward a realistic OPD spread (more routine than critical), but varied.
+    profile = _r.choices(["stable", "moderate", "severe", "critical"],
+                         weights=[4, 3, 2, 1], k=1)[0]
+    enc = synthetic.make_encounter(profile, seed=_r.randint(0, 999999))
+    r = score_encounter(enc)
+    return {
+        "encounter": enc.model_dump(mode="json"),
+        "proposed_priority": r.proposed_priority.value if r.proposed_priority else None,
+        "tews_total": r.tews_total,
+        "complaint": enc.presenting_complaint,
+    }
+
+
 @app.get("/api/demo/deterioration")
 async def demo_deterioration(seed: int = 7):
     base, recheck = synthetic.deterioration_series(seed)

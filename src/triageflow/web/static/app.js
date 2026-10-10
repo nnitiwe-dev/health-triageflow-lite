@@ -208,9 +208,8 @@ async function loadQueue() {
 }
 
 async function loadSynthetic() {
-  const resp = await fetch("/api/queue?n=1&seed=" + Math.floor(Math.random()*9999));
-  const q = await resp.json();
-  const enc = q[0].encounter; enc.encounter_id = newId();
+  const item = await (await fetch("/api/synthetic")).json();  // random acuity, not always green
+  const enc = item.encounter; enc.encounter_id = newId();
   fillForm(enc);
 }
 
