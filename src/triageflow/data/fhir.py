@@ -26,6 +26,9 @@ LOINC = {
     "temperature_c": ("8310-5", "Body temperature", "Cel"),
     "spo2": ("2708-6", "Oxygen saturation", "%"),
     "glucose_mmol": ("15074-8", "Glucose [Moles/volume] in Blood", "mmol/L"),
+    "diastolic_bp": ("8462-4", "Diastolic blood pressure", "mm[Hg]"),
+    "weight_kg": ("29463-7", "Body weight", "kg"),
+    "pain_score": ("72514-3", "Pain severity 0-10 verbal numeric rating", "{score}"),
 }
 # Non-standard observations -> local code system.
 LOCAL_CODES = {
@@ -90,7 +93,7 @@ def observations(enc: Encounter) -> list[dict[str, Any]]:
     v = enc.vitals
     out: list[dict[str, Any]] = []
     for param in ("respiratory_rate", "heart_rate", "systolic_bp", "temperature_c",
-                  "spo2", "glucose_mmol"):
+                  "spo2", "glucose_mmol", "diastolic_bp", "weight_kg", "pain_score"):
         val = getattr(v, param)
         if val is not None:
             out.append(_quantity_obs(enc, param, val))

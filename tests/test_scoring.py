@@ -127,6 +127,31 @@ def test_incomplete_without_override_is_not_scored():
     assert "respiratory_rate" in res.missing
 
 
+@pytest.mark.parametrize("pain,expected", [
+    (2, Priority.GREEN),    # mild pain → no escalation
+    (5, Priority.YELLOW),   # moderate pain → urgent
+    (8, Priority.ORANGE),   # severe pain → very urgent
+])
+def test_pain_score_maps_to_sats_pain_discriminator(pain, expected):
+    enc = Encounter(encounter_id="P1", vitals=_vit(
+        respiratory_rate=12, heart_rate=70, systolic_bp=120, temperature_c=37,
+        avpu=AVPU.ALERT, mobility=Mobility.WALKING, trauma=False, pain_score=pain))
+    res = score_encounter(enc)
+    assert res.proposed_priority == expected
+    if pain >= 4:  # the pain contribution must be sourced
+        assert any("pain" in e.observed.lower() and e.source for e in res.evidence)
+
+
+def test_diastolic_and_weight_are_recorded_not_scored():
+    base = _vit(respiratory_rate=12, heart_rate=70, systolic_bp=120, temperature_c=37,
+                avpu=AVPU.ALERT, mobility=Mobility.WALKING, trauma=False)
+    withextra = base.model_copy(update={"diastolic_bp": 80, "weight_kg": 72})
+    enc_a = Encounter(encounter_id="A", vitals=base)
+    enc_b = Encounter(encounter_id="B", vitals=withextra)
+    # diastolic/weight do not change TEWS (adult SATS scores systolic only)
+    assert score_encounter(enc_a).tews_total == score_encounter(enc_b).tews_total
+
+
 def test_spo2_flag_raises_priority():
     enc = Encounter(encounter_id="E4", vitals=_vit(
         respiratory_rate=12, heart_rate=70, systolic_bp=120, temperature_c=37,

@@ -24,6 +24,11 @@ class Settings:
     # Data residency guard — recorded in the audit log and shown in the UI.
     data_region: str = field(default_factory=lambda: _env("TRIAGEFLOW_DATA_REGION", "local-only"))
 
+    # Optional FHIR/EMR integration (OFF unless a base URL is set). Point this at a facility's
+    # IN-COUNTRY FHIR R4 server for a pilot, or a public sandbox for a synthetic-data demo.
+    # When empty, the app runs fully local with no network dependency (data residency default).
+    fhir_base_url: str = field(default_factory=lambda: _env("TRIAGEFLOW_FHIR_BASE_URL", "").rstrip("/"))
+
     # Paths
     home: Path = field(default_factory=lambda: Path(_env("TRIAGEFLOW_HOME", str(Path.home() / ".triageflow"))))
     protocols_dir: Path = field(default_factory=lambda: Path(

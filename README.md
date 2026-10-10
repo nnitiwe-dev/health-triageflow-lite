@@ -15,6 +15,32 @@ Theme: **Symptom-based priority scoring** · Protocol: **South African Triage Sc
 
 <p align="center"><sub>The nurse workspace — intake, the agent's live tool-call trace (own + borrowed MCP), and a sourced priority awaiting clinician confirmation.</sub></p>
 
+### What this README covers
+
+| Area | Where |
+|------|-------|
+| Problem statement | [The problem](#the-problem) · [Grounded in a real triage desk](#grounded-in-a-real-triage-desk) |
+| Solution overview · Target users | [What it does](#what-it-does-the-workflow-it-serves) |
+| Setup / installation · Usage | [Run it](#run-it-one-command) |
+| Architecture · Agent architecture | [Architecture](#architecture) · [ARCHITECTURE.md](ARCHITECTURE.md) |
+| MCP implementation · tools / servers | [MCP servers & tools](#mcp-servers--tools) · [docs/MCP.md](docs/MCP.md) |
+| Technology stack | [Technology stack](#technology-stack) |
+| Human-in-the-loop workflow | [Human-in-the-loop](#human-in-the-loop) |
+| Limitations · Future improvements | [Limitations](#limitations) · [Future improvements](#future-improvements) |
+
+---
+
+## The problem
+
+In most public-hospital outpatient departments across Africa the bottleneck is **triage**, not
+the doctor's door. One or two nurses with a BP cuff and a stack of case cards work through
+everyone before anyone gets a priority — so a genuinely urgent patient can wait **60–90 minutes**
+in the same queue as a routine follow-up, because nothing flags who to see next. **The wait
+itself becomes where the risk is.** A practising Nigerian nurse we spoke with confirmed many
+hospitals have *no formal triage framework at all*. **Who experiences it:** the triage nurse at
+that single desk (overloaded, no decision support) and the patients whose time-critical
+conditions stay invisible until too late.
+
 ---
 
 ## Run it (one command)
@@ -47,7 +73,39 @@ If a download fails or is interrupted, click **Clear & re-download** in the UI (
 `uv run triageflow pull-model --force-clean`). It wipes partial blobs and a broken manifest,
 then re-pulls cleanly — a bad download can never wedge the app.
 
+### Optional: import vitals from a FHIR EMR
+Off by default (the app runs fully local, no network — data residency). Point it at a FHIR R4
+server to let the nurse **import a patient's vitals** instead of re-typing them:
+
+```bash
+TRIAGEFLOW_FHIR_BASE_URL=https://hapi.fhir.org/baseR4 uv run triageflow serve
+```
+
+An **Import from EMR** button appears; it does a real write→read round trip (seeds a synthetic
+patient, reads the vitals back) and populates intake for the nurse to confirm. All data is
+**synthetic** — for a pilot, point the URL at the facility's **in-country** FHIR server so
+patient data never leaves the country. If the server is unreachable, the manual/synthetic path
+is unaffected. See `uv run triageflow seed-fhir -n 3` to pre-seed patients, and `doctor` to check it.
+
 ---
+
+## Grounded in a real triage desk
+
+We spoke with a **practising Nigerian nurse** (Oct 2026). Two things stood out:
+
+> *"Not all hospitals triage patients to begin with … there isn't [a formal framework]."* — and
+> *"The most severe cases go in first; it's not first-come-first-serve."*
+
+That validated the problem (triage is inconsistent/absent in many Nigerian OPDs) and the
+design (acuity-sorted queue, not FCFS). She also gave the exact data a nurse records. We
+changed the tool to match it, without touching the SATS scoring logic:
+
+| Nurse said | What we changed |
+|------------|-----------------|
+| "I document both systolic **and** diastolic" | Added **diastolic BP** capture (recorded; TEWS still scores systolic, per SATS) |
+| "We use **pulse rate**" | Relabelled Heart rate → **Pulse rate (HR)** |
+| "**Pain score 0–10**" | Added pain 0–10, mapped to the **SATS pain discriminator** (4–6 → moderate/YELLOW, 7–10 → severe/ORANGE), sourced |
+| "AVPU **or GCS**", "weight" | Added **weight**; kept AVPU (the SATS standard); GCS→AVPU mapping is noted as future work |
 
 ## What it does (the workflow it serves)
 
@@ -71,6 +129,15 @@ The result is a priority a nurse can defend in a clinical audit: a colour band, 
 time, and every contributing vital/sign with its SATS citation — plus a readable, append-only
 audit log of every tool call and the named approval.
 
+## Human-in-the-loop
+
+The approval gate is **structural, not a prompt instruction**: the agent is a LangGraph graph
+that `interrupt()`s before its final step and **cannot reach `finalize` without a named
+clinician's decision** supplied from the UI. The nurse/clinician **approves** the proposed
+priority or **overrides** it (with a reason); only then is a confirmed priority placed in the
+queue and written to the append-only audit log (who, what, when). A deterioration re-check only
+ever **raises a flag for a second look** — the agent never moves a patient.
+
 ---
 
 ## Documentation
@@ -82,22 +149,28 @@ audit log of every tool call and the named approval.
 | [docs/DATA.md](docs/DATA.md) | **Stakeholder data card** — how synthetic data is generated, explainability & trust, limitations |
 | [EVALS.md](EVALS.md) | 10 test tasks, pass/fail, determinism, the documented unfixed failure |
 | [DESCRIPTION.md](DESCRIPTION.md) | ~300-word summary (theme, facility, workflow) |
-| [docs/DEMO.md](docs/DEMO.md) | <3-min demo script |
 | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor guide, privacy/disclosure policy, conduct |
 
-## Architecture (short)
+## Architecture
 
 A **LangGraph** state machine with tool-calling nodes — a predictable workflow, not a
-free-running multi-agent loop. See [ARCHITECTURE.md](ARCHITECTURE.md).
+free-running multi-agent loop. Full write-up in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-- **Own MCP server** (`triageflow`): `validate_triage_input`, `score_triage`,
-  `check_deterioration`, `request_clinician_approval`, `suggest_discriminators` — every
-  call audit-logged.
+![TriageFlow Lite architecture — nurse + Web UI, the LangGraph agent and its nodes, the open-weights model, the MCP client and both MCP servers with their tools, the deterministic SATS engine, audit log, data sources, the optional FHIR server, and the human approval gate, all inside an in-country/on-device boundary.](docs/img/architecture.png)
+
+### MCP servers & tools
+
+- **Own MCP server** (`triageflow`, stdio): `validate_triage_input`, `score_triage` ★,
+  `check_deterioration` ★, `request_clinician_approval` ★ (the irreversible-action gate),
+  `suggest_discriminators`, `fetch_fhir_vitals` (optional EMR import). ★ = action tools; every
+  call is audit-logged. (Not a single-endpoint proxy.)
 - **Borrowed MCP server**: the official
   [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers),
   read-only over `protocols/`, serving the cited SATS text. *Why borrow:* sandboxed,
   path-traversal-safe file access is a solved problem — reusing the reference is safer and
   faster than writing our own.
+- **MCP client**: `langchain-mcp-adapters` `MultiServerMCPClient` launches both over stdio and
+  loads their tools; the LangGraph nodes call them. Full catalog + call logic in [docs/MCP.md](docs/MCP.md).
 - **Open-weights model** via locally-managed Ollama — patient data never leaves the machine.
 
 ## Data
@@ -108,13 +181,36 @@ use SNOMED CT** (its Affiliate licence carries fees in non-member countries — 
 risk) or real datasets like MIMIC (de-identified real data + out-of-country residency). A
 reproducible generator produces the waiting queue and a deterioration series.
 
-## Safety & limitations
+## Technology stack
+
+- **Language:** Python 3.11
+- **Agent / orchestration:** LangGraph (`StateGraph`, `MemorySaver` checkpointer, `interrupt()`)
+- **LLM:** Qwen2.5-7B-Instruct (fallback Llama-3.2-3B) — **open-weights, local via Ollama** (`langchain-ollama`)
+- **MCP:** `mcp` (FastMCP) for our server · `langchain-mcp-adapters` (MultiServerMCPClient) client · borrowed `@modelcontextprotocol/server-filesystem` (npx)
+- **Web:** FastAPI · Jinja2 · Tailwind · vanilla JS (SSE streaming) · Uvicorn
+- **Data / validation:** Pydantic v2 · **FHIR R4** + **LOINC** · SQLite + JSONL (audit log)
+- **External API (optional):** FHIR R4 server — in-country EMR, or HAPI sandbox for a demo
+- **Triage scale:** South African Triage Scale (SATS) Adult / TEWS
+- **Tooling:** `uv` · pytest (89 tests) · eval harness (`evals/`) · ruff · Apache-2.0
+
+## Limitations
 
 - Adult pathway only (>12y / >150cm). Paediatric SATS is out of scope for this version.
 - The free-text sign extractor can miss or over-suggest; candidates **never** affect the
-  score until the nurse confirms them (see the documented failure in [EVALS.md](EVALS.md)).
+  score until the nurse confirms them (see the documented failure E8 in [EVALS.md](EVALS.md)).
+- The optional FHIR import adds a network dependency; it is **off by default** and degrades
+  gracefully. CPU LLM inference is slow on first load (the deterministic priority is instant).
 - Not a medical device. Thresholds are a re-encoding of a published scale and must be
   clinically reviewed before any real use.
+
+## Future improvements
+
+- **Paediatric SATS** pathway (separate age-banded TEWS), and **GCS → AVPU** mapping.
+- Shrink the extractor's under-triage gap (E8): synonym expansion done; next, a
+  constrained-decoding LLM pass with a confidence threshold + a recall ("sensitivity") metric.
+- A borrowed **FHIR MCP** in front of an in-country EMR for pilots (see [docs/MCP.md](docs/MCP.md)).
+- **Queue & flow** signals (staffing vs volume) and **referral routing** as further themes.
+- Vendor the Tailwind/font CDN assets for fully-offline deployment.
 
 ## Licence & attribution
 

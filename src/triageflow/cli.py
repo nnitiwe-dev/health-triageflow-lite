@@ -35,6 +35,31 @@ def _doctor() -> int:
     except Exception as e:
         print(f"MCP check failed : {type(e).__name__}: {e}")
         return 1
+
+    from .agent import fhir_emr
+    if fhir_emr.fhir_enabled():
+        s = fhir_emr.server_status()
+        print(f"FHIR integration : ON  → {s['base_url']}  (reachable={s['reachable']})")
+    else:
+        print("FHIR integration : off (set TRIAGEFLOW_FHIR_BASE_URL to enable EMR import)")
+    return 0
+
+
+def _seed_fhir(n: int) -> int:
+    from .agent import fhir_emr
+    from .data import synthetic
+    if not fhir_emr.fhir_enabled():
+        print("Set TRIAGEFLOW_FHIR_BASE_URL first (e.g. https://hapi.fhir.org/baseR4).")
+        return 1
+    print(f"Seeding {n} synthetic patient(s) to FHIR server "
+          f"{fhir_emr.server_status()['base_url']} …")
+    for i, enc in enumerate(synthetic.stream(n=n, seed=100 + n), 1):
+        try:
+            pid = fhir_emr.seed_patient(enc)
+            print(f"  {i}. Patient/{pid}  ← {enc.presenting_complaint[:50]}")
+        except fhir_emr.FHIRUnavailable as e:
+            print(f"  {i}. FAILED: {e}")
+            return 1
     return 0
 
 
@@ -98,10 +123,14 @@ def main(argv: list[str] | None = None) -> int:
     pm = sub.add_parser("pull-model", help="download the open-weights model")
     pm.add_argument("--force-clean", action="store_true", help="clear a broken download first")
     sub.add_parser("demo", help="run one assessment in the terminal")
+    sf = sub.add_parser("seed-fhir", help="push synthetic patients to the configured FHIR server")
+    sf.add_argument("-n", type=int, default=3, help="how many patients to seed")
     args = p.parse_args(argv)
 
     if args.cmd == "doctor":
         return _doctor()
+    if args.cmd == "seed-fhir":
+        return _seed_fhir(args.n)
     if args.cmd == "pull-model":
         return _pull(args.force_clean)
     if args.cmd == "demo":

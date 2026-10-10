@@ -23,6 +23,8 @@ PLAUSIBLE = {
     "temperature_c": (28.0, 43.0),
     "spo2": (40, 100),
     "glucose_mmol": (0.5, 50),
+    "diastolic_bp": (20, 200),
+    "weight_kg": (1, 400),
 }
 STALE_MINUTES = 30  # vitals older than this at triage are flagged for re-check
 
@@ -74,6 +76,12 @@ def validate_vitals(vitals: VitalSigns, now: datetime | None = None) -> Validati
         if age_min > STALE_MINUTES:
             issues.append(Issue(field="measured_at", severity=Severity.WARNING,
                 message=f"Vitals measured {int(age_min)} min ago (> {STALE_MINUTES}); consider re-check."))
+
+    # BP sanity: diastolic should be below systolic
+    if vitals.diastolic_bp is not None and vitals.systolic_bp is not None \
+            and vitals.diastolic_bp >= vitals.systolic_bp:
+        issues.append(Issue(field="diastolic_bp", severity=Severity.ERROR,
+            message=f"Diastolic ({vitals.diastolic_bp}) ≥ systolic ({vitals.systolic_bp}); check entry."))
 
     # Simple contradictions
     if vitals.avpu is not None and vitals.mobility is not None:

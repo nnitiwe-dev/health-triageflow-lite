@@ -16,28 +16,33 @@ from datetime import UTC, datetime, timedelta
 from ..core.models import Encounter, VitalSigns
 from ..core.sats_rules import AVPU, Mobility
 
+# Presenting complaints written as realistic triage-desk notes: the patient's symptoms in
+# nurse shorthand (C/O = complains of, Hx = history, N = nausea, PV = per vagina, x3/7 =
+# for 3 days), with onset, associated symptoms and pertinent negatives — never a diagnosis.
+# Terse for low-acuity, richer for urgent. The free text is deliberately messy so the agent's
+# extraction does real work; the structured discriminator codes are the confirmed truth.
 COMPLAINTS_GREEN = [
-    ("Sore throat for 3 days", []),
-    ("Medication refill", []),
-    ("Mild ankle sprain, walking", []),
-    ("Routine BP check", []),
+    ("Here for repeat BP meds, feels well, no complaints today", []),
+    ("Sore throat x3/7, eating & drinking OK, no fever at home", []),
+    ("Twisted R ankle yest, swelling+ but weight-bearing, no deformity", []),
+    ("Here for BP check, asymptomatic", []),
 ]
 COMPLAINTS_YELLOW = [
-    ("Abdominal pain since morning", ["abdo_pain"]),
-    ("Closed forearm fracture after fall", ["fracture_closed"]),
-    ("Persistent vomiting all day", ["vomiting_persistent"]),
-    ("Moderate back pain", ["moderate_pain"]),
+    ("C/O abdo pain since AM, periumbilical, N x1, no vomiting/diarrhoea. Hx nil", ["abdo_pain"]),
+    ("Fell onto R wrist ~2hrs ago, swollen+deformed, ?fracture, fingers mobile", ["fracture_closed"]),
+    ("Persistent vomiting x6 since last night, tolerating no fluids, no blood seen", ["vomiting_persistent"]),
+    ("C/O lower back pain x2/7, moderate pain, worse on movement, no leg weakness", ["moderate_pain"]),
 ]
 COMPLAINTS_ORANGE = [
-    ("Central chest pain radiating to arm", ["chest_pain"]),
-    ("Acute shortness of breath", ["sob_acute"]),
-    ("Severe abdominal pain, pregnant", ["pregnancy_abdo", "severe_pain"]),
-    ("Possible stroke, facial droop", ["focal_neuro_acute"]),
+    ("C/O central chest pain x1hr, pressure-like, radiates to L arm, diaphoretic. Hx HTN, DM2", ["chest_pain"]),
+    ("SOB since last night, worse lying flat, speaking in short sentences. Hx asthma", ["sob_acute"]),
+    ("Pregnant ~30/40 c/o severe abdo pain + feels faint, no PV bleed noted", ["pregnancy_abdo", "severe_pain"]),
+    ("Facial droop + slurred speech since ~45min per family, R arm weak, ?stroke", ["focal_neuro_acute"]),
 ]
 COMPLAINTS_RED = [
-    ("Found collapsed, not breathing", ["cardiac_arrest"]),
-    ("Active seizure on arrival", ["seizure_active"]),
-    ("Facial burns from house fire", ["burn_face_inhalation"]),
+    ("Found collapsed at home per EMS, not breathing on arrival, CPR ongoing", ["cardiac_arrest"]),
+    ("Witnessed seizure on arrival, still convulsing, not responding to voice", ["seizure_active"]),
+    ("Burns to face from house fire, soot around mouth, hoarse voice", ["burn_face_inhalation"]),
 ]
 
 
@@ -90,15 +95,23 @@ def make_encounter(profile_name: str, seed: int, include_spo2: bool = True) -> E
     p = PROFILES[profile_name]
     complaint, codes = rng.choice(_LEVELS[profile_name])
     arrival = datetime.now(UTC) - timedelta(minutes=rng.randint(0, 90))
+    systolic = round(_clip(rng.gauss(*p.sbp), 60, 210))
+    # Diastolic ~ 0.63 x systolic with a little noise (kept below systolic); pain by acuity.
+    diastolic = round(_clip(systolic * 0.63 + rng.gauss(0, 5), 30, systolic - 10))
+    pain_by_profile = {"stable": (1, 1), "moderate": (5, 1), "severe": (7, 1.5), "critical": (8, 1.5)}
+    pain = int(_clip(round(rng.gauss(*pain_by_profile[profile_name])), 0, 10))
     vitals = VitalSigns(
         respiratory_rate=round(_clip(rng.gauss(*p.rr), 6, 48)),
         heart_rate=round(_clip(rng.gauss(*p.hr), 35, 180)),
-        systolic_bp=round(_clip(rng.gauss(*p.sbp), 60, 210)),
+        systolic_bp=systolic,
+        diastolic_bp=diastolic,
         temperature_c=round(_clip(rng.gauss(*p.temp), 34.0, 41.0), 1),
         avpu=_weighted(rng, p.avpu_weights),
         mobility=_weighted(rng, p.mobility_weights),
         trauma=rng.random() < 0.25,
         spo2=round(_clip(rng.gauss(*p.spo2), 70, 100)) if include_spo2 else None,
+        weight_kg=round(_clip(rng.gauss(70, 15), 40, 130), 1),
+        pain_score=pain,
         measured_at=arrival + timedelta(minutes=rng.randint(1, 8)),
     )
     return Encounter(

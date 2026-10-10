@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1200" font-family="Inter, Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrowB" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#0a0a0a"/>
+    </marker>
+    <style>
+      .t { fill:#0a0a0a; font-weight:700; }
+      .s { fill:#475569; font-weight:400; }
+      .tiny { fill:#64748b; font-weight:400; }
+      .wht { fill:#ffffff; font-weight:700; }
+      .lbl { fill:#334155; font-weight:600; }
+    </style>
+  </defs>
+
+  <rect width="1680" height="1200" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="40" y="48" font-size="30" class="t">TriageFlow Lite — Agentic Architecture</text>
+  <text x="40" y="76" font-size="16" class="s">SATS-sourced triage prioritisation · scores &amp; sequences, never diagnoses · a clinician confirms every priority</text>
+
+  <!-- Legend -->
+  <g font-size="13">
+    <rect x="1140" y="22" width="500" height="58" rx="10" fill="#fafafa" stroke="#ededed"/>
+    <rect x="1156" y="34" width="14" height="14" rx="3" fill="#eff6ff" stroke="#2563eb"/><text x="1176" y="45" class="lbl">Built by us</text>
+    <rect x="1268" y="34" width="14" height="14" rx="3" fill="#f5f3ff" stroke="#7c3aed"/><text x="1288" y="45" class="lbl">Borrowed MCP</text>
+    <rect x="1400" y="34" width="14" height="14" rx="3" fill="#f0fdf4" stroke="#16a34a"/><text x="1420" y="45" class="lbl">Open-weights model</text>
+    <rect x="1156" y="56" width="14" height="14" rx="3" fill="#fffbeb" stroke="#d97706"/><text x="1176" y="67" class="lbl">External (opt.)</text>
+    <rect x="1300" y="56" width="14" height="14" rx="3" fill="#fef2f2" stroke="#dc2626"/><text x="1320" y="67" class="lbl">Human gate</text>
+    <rect x="1440" y="56" width="14" height="14" rx="3" fill="#f8fafc" stroke="#475569"/><text x="1460" y="67" class="lbl">Data / store</text>
+  </g>
+
+  <!-- Residency boundary -->
+  <rect x="34" y="96" width="1402" height="1066" rx="16" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="50" y="120" font-size="13" fill="#16a34a" font-weight="700">IN-COUNTRY / ON-DEVICE — patient data &amp; inference never leave the machine</text>
+
+  <!-- ROW 1: Human + UI -->
+  <g>
+    <rect x="60" y="140" width="300" height="96" rx="12" fill="#f3f4f6" stroke="#0a0a0a" stroke-width="2"/>
+    <text x="80" y="176" font-size="18" class="t">👩🏽‍⚕️ Triage Nurse / Clinician</text>
+    <text x="80" y="200" font-size="13" class="s">Enters vitals + complaint,</text>
+    <text x="80" y="218" font-size="13" class="s">confirms or overrides the priority</text>
+
+    <rect x="420" y="140" width="1000" height="96" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="440" y="172" font-size="18" class="t">Nurse Workspace (Web UI)</text>
+    <text x="440" y="196" font-size="13" class="s">FastAPI · Jinja2 · Tailwind · vanilla JS — structured intake, live tool-call trace (SSE), approval control</text>
+    <text x="440" y="216" font-size="13" class="s">Panels: 1 Intake  ·  2 Agent activity (streamed)  ·  3 Proposed priority + clinician gate  ·  waiting queue (acuity-sorted)</text>
+  </g>
+  <line x1="360" y1="188" x2="416" y2="188" stroke="#0a0a0a" stroke-width="2" marker-end="url(#arrowB)" marker-start="url(#arrowB)"/>
+
+  <!-- ROW 2: Agent + Model -->
+  <g>
+    <rect x="420" y="268" width="1000" height="214" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="440" y="298" font-size="18" class="t">Agent — LangGraph StateGraph  <tspan class="s" font-size="13" font-weight="400">(open-source orchestration · checkpointer = MemorySaver)</tspan></text>
+    <text x="440" y="320" font-size="12.5" class="s">A predictable workflow with tool-calling nodes (not a free-running loop). Validates its own data, checks its citations, recovers via deterministic fallback.</text>
+
+    <!-- node pipeline -->
+    <g font-size="12.5" font-weight="700">
+      <rect x="440" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="500" y="362" text-anchor="middle" class="t">validate</text><text x="500" y="378" text-anchor="middle" class="tiny" font-weight="400">data quality</text>
+      <rect x="576" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="636" y="362" text-anchor="middle" class="t">extract</text><text x="636" y="378" text-anchor="middle" class="tiny" font-weight="400">signs (LLM)</text>
+      <rect x="712" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="772" y="362" text-anchor="middle" class="t">retrieve</text><text x="772" y="378" text-anchor="middle" class="tiny" font-weight="400">evidence</text>
+      <rect x="848" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="908" y="362" text-anchor="middle" class="t">score</text><text x="908" y="378" text-anchor="middle" class="tiny" font-weight="400">deterministic</text>
+      <rect x="984" y="340" width="130" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="1049" y="362" text-anchor="middle" class="t">deterioration</text><text x="1049" y="378" text-anchor="middle" class="tiny" font-weight="400">re-check flag</text>
+      <rect x="1130" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="1190" y="362" text-anchor="middle" class="t">self-check</text><text x="1190" y="378" text-anchor="middle" class="tiny" font-weight="400">grounding</text>
+      <rect x="1266" y="340" width="134" height="48" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/><text x="1333" y="360" text-anchor="middle" fill="#dc2626">⏸ approval</text><text x="1333" y="378" text-anchor="middle" fill="#dc2626" font-weight="400">interrupt()</text>
+      <g stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)">
+        <line x1="560" y1="364" x2="574" y2="364"/><line x1="696" y1="364" x2="710" y2="364"/><line x1="832" y1="364" x2="846" y2="364"/>
+        <line x1="968" y1="364" x2="982" y2="364"/><line x1="1114" y1="364" x2="1128" y2="364"/><line x1="1250" y1="364" x2="1264" y2="364"/>
+      </g>
+    </g>
+    <!-- finalize -->
+    <rect x="440" y="416" width="960" height="46" rx="8" fill="#fff" stroke="#93c5fd"/>
+    <text x="456" y="438" font-size="12.5" class="t">finalize  <tspan class="s" font-weight="400">→ records the named clinician's decision &amp; the confirmed priority (only reachable after the approval interrupt resumes)</tspan></text>
+
+    <!-- Model -->
+    <rect x="1180" y="498" width="240" height="118" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+    <text x="1200" y="528" font-size="16" class="t">Qwen2.5-7B-Instruct</text>
+    <text x="1200" y="550" font-size="12.5" class="s">via local Ollama (open-weights)</text>
+    <text x="1200" y="570" font-size="12.5" class="s">fallback Llama-3.2-3B</text>
+    <text x="1200" y="594" font-size="12" class="tiny">Used only by extract + self-check</text>
+    <text x="1200" y="610" font-size="12" class="tiny">narration — never scores.</text>
+  </g>
+  <!-- UI <-> agent -->
+  <line x1="920" y1="236" x2="920" y2="266" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+  <!-- agent <-> model -->
+  <path d="M1333 390 L1333 470 L1300 470 L1300 498" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+
+  <!-- ROW 3: MCP client + servers -->
+  <rect x="60" y="520" width="300" height="86" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="80" y="552" font-size="16" class="t">MCP client</text>
+  <text x="80" y="574" font-size="12.5" class="s">langchain-mcp-adapters</text>
+  <text x="80" y="592" font-size="12" class="tiny">MultiServerMCPClient (stdio)</text>
+
+  <!-- own server -->
+  <rect x="420" y="648" width="640" height="200" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="440" y="678" font-size="17" class="t">Own MCP server — "triageflow"  <tspan class="s" font-size="12" font-weight="400">(stdio · the agent's hands)</tspan></text>
+  <g font-size="12.5">
+    <rect x="440" y="692" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="710" class="t">validate_triage_input</text><text x="452" y="726" class="tiny">missing / implausible / stale / unit</text>
+    <rect x="746" y="692" width="300" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="758" y="710" class="t">score_triage ★</text><text x="758" y="726" class="tiny">deterministic SATS priority + evidence</text>
+    <rect x="440" y="740" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="758" class="t">check_deterioration ★</text><text x="452" y="774" class="tiny">re-check vs baseline → 2nd-look flag</text>
+    <rect x="746" y="740" width="300" height="40" rx="7" fill="#fef2f2" stroke="#dc2626"/><text x="758" y="758" fill="#dc2626" font-weight="700">request_clinician_approval ★</text><text x="758" y="774" class="tiny">the irreversible-action gate</text>
+    <rect x="440" y="788" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="806" class="t">suggest_discriminators</text><text x="452" y="822" class="tiny">free text → candidate signs</text>
+    <rect x="746" y="788" width="300" height="40" rx="7" fill="#fffbeb" stroke="#d97706"/><text x="758" y="806" class="t">fetch_fhir_vitals</text><text x="758" y="822" class="tiny">optional EMR import (off by default)</text>
+  </g>
+  <text x="440" y="842" font-size="11.5" class="tiny">★ = an action tool. Every call is written to the audit log.</text>
+
+  <!-- borrowed server -->
+  <rect x="1100" y="648" width="320" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1120" y="678" font-size="16" class="t">Borrowed MCP — "filesystem"</text>
+  <text x="1120" y="700" font-size="12.5" class="s">@modelcontextprotocol/server-filesystem</text>
+  <text x="1120" y="718" font-size="12.5" class="s">(official reference · run via npx)</text>
+  <rect x="1120" y="728" width="280" height="30" rx="7" fill="#fff" stroke="#c4b5fd"/>
+  <text x="1132" y="748" font-size="12.5" class="t">read_text_file <tspan class="tiny" font-weight="400">→ protocol evidence (read-only)</tspan></text>
+
+  <!-- agent -> client -->
+  <path d="M470 482 L470 500 L210 500 L210 518" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)"/>
+  <!-- client -> servers -->
+  <path d="M250 606 L250 628 L560 628 L560 646" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M300 606 L300 628 L1260 628 L1260 646" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ROW 4: core + data stores -->
+  <rect x="420" y="880" width="300" height="96" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+  <text x="438" y="910" font-size="15" class="t">Deterministic SATS/TEWS engine</text>
+  <text x="438" y="932" font-size="12" class="s">pure Python · zero run-to-run variance</text>
+  <text x="438" y="950" font-size="12" class="s">every point cites the SATS chart</text>
+  <text x="438" y="968" font-size="11.5" class="tiny">used by score_triage &amp; check_deterioration</text>
+
+  <rect x="740" y="880" width="300" height="96" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+  <text x="758" y="910" font-size="15" class="t">Audit log (append-only)</text>
+  <text x="758" y="932" font-size="12" class="s">JSONL + SQLite</text>
+  <text x="758" y="950" font-size="12" class="s">inputs · outputs · timestamps ·</text>
+  <text x="758" y="968" font-size="12" class="s">named clinician approval</text>
+
+  <rect x="1060" y="880" width="360" height="96" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+  <text x="1078" y="910" font-size="15" class="t">Data sources</text>
+  <text x="1078" y="932" font-size="12" class="s">protocols/sats_adult.md (cited SATS rules)</text>
+  <text x="1078" y="950" font-size="12" class="s">synthetic FHIR R4 generator (LOINC codes)</text>
+  <text x="1078" y="968" font-size="11.5" class="tiny">no real patient data · synthetic by default</text>
+
+  <!-- score -> engine -->
+  <path d="M900 732 L900 760 L620 760 L620 878" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <!-- server -> audit -->
+  <path d="M900 848 L900 878" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <!-- filesystem -> data sources -->
+  <path d="M1260 768 L1260 840 L1240 840 L1240 878" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- EXTERNAL (optional) FHIR -->
+  <rect x="1480" y="648" width="170" height="150" rx="12" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <text x="1498" y="676" font-size="15" class="t">FHIR R4</text>
+  <text x="1498" y="696" font-size="15" class="t">server</text>
+  <text x="1498" y="720" font-size="12" class="s">in-country EMR</text>
+  <text x="1498" y="738" font-size="12" class="s">(or HAPI sandbox</text>
+  <text x="1498" y="756" font-size="12" class="s">for a demo)</text>
+  <text x="1498" y="782" font-size="11" class="tiny">External API · optional</text>
+  <!-- fetch_fhir_vitals <-> FHIR -->
+  <path d="M1046 808 L1300 808 L1300 760 L1479 760" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+
+  <!-- Human gate loop: approval node waits on nurse -->
+  <path d="M1333 318 L1333 150 L362 150" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowB)"/>
+  <text x="980" y="142" font-size="12.5" fill="#dc2626" font-weight="700">approval gate pauses → named clinician approves/overrides in the UI → finalize + audit</text>
+</svg>

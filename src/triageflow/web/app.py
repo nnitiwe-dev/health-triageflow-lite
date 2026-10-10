@@ -12,6 +12,7 @@ import json
 import os
 import queue
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..agent import fhir_emr
 from ..agent import ollama_manager as om
 from ..agent.graph import TriageAgent
 from ..agent.mcp_client import TriageMCP
@@ -31,6 +33,9 @@ from ..data import synthetic
 _HERE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
 audit = get_audit()
+# Cache-buster for static assets: changes on every server start, so a restart always serves
+# fresh app.js / styles.css (no stale-cached-JS surprises).
+_ASSET_V = str(int(time.time()))
 
 app = FastAPI(title="TriageFlow Lite")
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
@@ -65,23 +70,83 @@ def _agent() -> TriageAgent:
     return _state["agent"]
 
 
+def _maybe_refresh_model() -> None:
+    """Self-heal: if no model was ready at startup, re-check — lightweight. Lets a model that
+    becomes available later clear the banner without a restart. Does NOT start the Ollama
+    server (so it never pops up the app or blocks the event loop); the one-time start happens
+    at startup only."""
+    if os.environ.get("TRIAGEFLOW_NO_LLM") or _state.get("model"):
+        return
+    model, using_fallback = om.resolve_model()
+    if model:
+        _state["model"] = model
+        _state["using_fallback"] = using_fallback
+        _state["agent"] = TriageAgent(_state["mcp"], model=model)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    await asyncio.to_thread(_maybe_refresh_model)  # resolve active model before paint (non-blocking)
     return templates.TemplateResponse(request, "index.html", {
-        "model": _state["model"] or "none",
+        "model": _state["model"] or "detecting…",
         "using_fallback": _state["using_fallback"],
         "servers": _state["servers"],
         "data_region": settings.data_region,
+        "asset_v": _ASSET_V,
     })
 
 
 @app.get("/api/status")
 async def status():
+    await asyncio.to_thread(_maybe_refresh_model)
     return {
         "model": _state["model"], "using_fallback": _state["using_fallback"],
         "servers": _state["servers"], "data_region": settings.data_region,
         "ollama_models": om.list_models(),
         "model_ready": _state["model"] is not None,
+        "fhir": {"enabled": fhir_emr.fhir_enabled(), "base_url": settings.fhir_base_url or None},
+    }
+
+
+@app.get("/api/fhir/status")
+async def fhir_status():
+    """Reachability of the configured FHIR server (no writes)."""
+    return await asyncio.to_thread(fhir_emr.server_status)
+
+
+@app.post("/api/fhir/import")
+async def fhir_import(request: Request):
+    """Import vitals from the FHIR server. With {patient_id} reads that patient; otherwise seeds
+    one synthetic patient and reads it back (a full write→read round trip). Returns an encounter
+    to populate intake. Degrades gracefully if the server is unavailable."""
+    if not fhir_emr.fhir_enabled():
+        return JSONResponse({"error": "FHIR integration is off (set TRIAGEFLOW_FHIR_BASE_URL)."},
+                            status_code=400)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    patient_id = (body or {}).get("patient_id")
+    try:
+        if patient_id:
+            vitals = await asyncio.to_thread(fhir_emr.import_patient_vitals, patient_id)
+            complaint = ""
+        else:
+            enc = synthetic.make_encounter("severe", seed=int(__import__("time").time()) % 100000)
+            patient_id, vitals = await asyncio.to_thread(fhir_emr.demo_round_trip, enc)
+            complaint = enc.presenting_complaint
+    except fhir_emr.FHIRUnavailable as e:
+        return JSONResponse({"error": f"FHIR server unavailable: {e}"}, status_code=502)
+    return {
+        "patient_id": patient_id,
+        "source": f"FHIR @ {settings.fhir_base_url}",
+        "encounter": {
+            "encounter_id": f"FHIR-{patient_id}",
+            "presenting_complaint": complaint,
+            "discriminator_codes": [],
+            "vitals": vitals.model_dump(mode="json"),
+        },
     }
 
 
@@ -97,9 +162,16 @@ async def queue_demo(n: int = 6, seed: int = 42):
             "tews_total": r.tews_total,
             "complaint": enc.presenting_complaint,
         })
-    # Order by acuity so the most urgent surfaces — the whole point of the desk.
+    # Order by acuity (then arrival) so the most urgent surfaces — the point of the desk.
     order = {"RED": 0, "ORANGE": 1, "YELLOW": 2, "GREEN": 3, None: 4}
-    out.sort(key=lambda x: order.get(x["proposed_priority"], 4))
+    out.sort(key=lambda x: (order.get(x["proposed_priority"], 4),
+                            x["encounter"].get("arrival_time", "")))
+    # Annotate explicit queue position so the UI shows who is seen first → last.
+    total = len(out)
+    for i, item in enumerate(out):
+        item["position"] = i + 1
+        item["total"] = total
+        item["is_next"] = (i == 0)
     return out
 
 

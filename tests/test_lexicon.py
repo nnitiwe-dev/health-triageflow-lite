@@ -27,3 +27,18 @@ def test_red_flag_phrases_surface_candidate(phrase, expected):
 
 def test_benign_text_surfaces_nothing_urgent():
     assert suggest_codes("here for a routine blood pressure check") == []
+
+
+@pytest.mark.parametrize("text,code", [
+    ("denies chest pain, here for refill", "chest_pain"),
+    ("pregnant, no PV bleed noted", "pregnancy_pv_bleed"),
+    ("no SOB, no fever", "sob_acute"),
+    ("ruled out overdose", "poisoning_overdose"),
+])
+def test_negated_findings_are_not_surfaced(text, code):
+    assert code not in suggest_codes(text)
+
+
+def test_negation_is_clause_bounded():
+    # the negation ("no fever") must not suppress a positive finding in the next clause
+    assert "chest_pain" in suggest_codes("no fever, but c/o chest pain radiating to arm")

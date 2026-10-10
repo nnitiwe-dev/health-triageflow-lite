@@ -19,7 +19,8 @@ function readForm() {
     discriminator_codes: currentEncounter?.discriminator_codes || [],
     vitals: {
       respiratory_rate: num("f-rr"), heart_rate: num("f-hr"), systolic_bp: num("f-sbp"),
-      temperature_c: num("f-temp"), spo2: num("f-spo2"), glucose_mmol: num("f-glucose"),
+      diastolic_bp: num("f-dbp"), temperature_c: num("f-temp"), spo2: num("f-spo2"),
+      glucose_mmol: num("f-glucose"), weight_kg: num("f-weight"), pain_score: num("f-pain"),
       avpu: str("f-avpu"), mobility: str("f-mobility"), trauma: $("f-trauma").checked,
     },
   };
@@ -31,8 +32,10 @@ function fillForm(enc) {
   $("f-complaint").value = enc.presenting_complaint || "";
   const v = enc.vitals || {};
   $("f-rr").value = v.respiratory_rate ?? ""; $("f-hr").value = v.heart_rate ?? "";
-  $("f-sbp").value = v.systolic_bp ?? ""; $("f-temp").value = v.temperature_c ?? "";
-  $("f-spo2").value = v.spo2 ?? ""; $("f-glucose").value = v.glucose_mmol ?? "";
+  $("f-sbp").value = v.systolic_bp ?? ""; $("f-dbp").value = v.diastolic_bp ?? "";
+  $("f-temp").value = v.temperature_c ?? ""; $("f-spo2").value = v.spo2 ?? "";
+  $("f-glucose").value = v.glucose_mmol ?? ""; $("f-weight").value = v.weight_kg ?? "";
+  $("f-pain").value = v.pain_score ?? "";
   $("f-avpu").value = v.avpu ?? ""; $("f-mobility").value = v.mobility ?? "";
   $("f-trauma").checked = !!v.trauma;
 }
@@ -187,12 +190,16 @@ async function loadQueue() {
   const q = await resp.json();
   $("queue").innerHTML = q.map((item, i) => {
     const p = item.proposed_priority;
-    return `<div class="qcard" data-i="${i}">
-      <div class="flex items-center justify-between mb-1">
-        <span class="text-[11px] text-subtle">${item.encounter.encounter_id}</span>
+    const pos = item.position ?? (i + 1);
+    const badge = item.is_next
+      ? `<span class="qnext">NEXT →</span>`
+      : (pos === item.total ? `<span class="qlast">last</span>` : "");
+    return `<div class="qcard" data-i="${i}" title="${item.complaint.replace(/"/g,'&quot;')}">
+      <div class="flex items-center justify-between mb-1.5">
+        <div class="flex items-center gap-1.5"><span class="qpos">${pos}</span>${badge}</div>
         <span class="qband band-${p}"></span></div>
-      <div class="text-[13px] font-medium leading-snug">${item.complaint}</div>
-      <div class="text-[11px] text-subtle mt-1">${p} · TEWS ${item.tews_total ?? "–"}</div>
+      <div class="qcomplaint">${item.complaint}</div>
+      <div class="text-[11px] text-subtle mt-1">${item.encounter.encounter_id} · ${p} · TEWS ${item.tews_total ?? "–"}</div>
     </div>`;
   }).join("");
   window._queue = q;
@@ -234,15 +241,54 @@ async function pullModel(forceClean) {
   $("btn-pull").disabled = false; $("btn-repair").disabled = false;
 }
 
+let _statusTimer = null;
 async function refreshStatus() {
-  const s = await (await fetch("/api/status")).json();
+  let s;
+  try { s = await (await fetch("/api/status")).json(); } catch { return; }
   $("chip-model").textContent = `model: ${s.model || "none"}${s.using_fallback ? " (fallback)" : ""}`;
-  if (!s.model_ready) $("model-banner").classList.remove("hidden");
+  const ready = !!s.model_ready;
+  // Auto-hide the banner the moment a model is ready; poll until then so a late/cold-starting
+  // Ollama clears it on its own (no manual reload, no falsely-stuck banner).
+  $("model-banner").classList.toggle("hidden", ready);
+  if (!ready && !_statusTimer) _statusTimer = setInterval(refreshStatus, 3000);
+  if (ready && _statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
+  if (s.fhir && s.fhir.enabled) {
+    $("btn-fhir").classList.remove("hidden");
+    const host = (s.fhir.base_url || "").replace(/^https?:\/\//, "");
+    $("chip-fhir").textContent = "FHIR: " + host;
+    $("chip-fhir").classList.remove("hidden");
+  }
+}
+
+async function importFromFhir() {
+  $("btn-fhir").disabled = true;
+  const prev = $("btn-fhir").textContent;
+  $("btn-fhir").textContent = "Importing…";
+  try {
+    const resp = await fetch("/api/fhir/import", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const data = await resp.json();
+    if (data.error) {
+      $("fhir-note").classList.remove("hidden");
+      $("fhir-note").textContent = "FHIR import failed: " + data.error + " — use manual/synthetic instead.";
+      return;
+    }
+    const enc = data.encounter;
+    enc.encounter_id = newId();
+    fillForm(enc);
+    $("fhir-note").classList.remove("hidden");
+    $("fhir-note").innerHTML = `Imported vitals from <b>${data.source}</b> (patient ${data.patient_id}). Confirm & assess.`;
+  } finally {
+    $("btn-fhir").disabled = false;
+    $("btn-fhir").textContent = prev;
+  }
 }
 
 // ---- wire up ----------------------------------------------------------------
 $("btn-assess").onclick = assess;
 $("btn-synthetic").onclick = loadSynthetic;
+$("btn-fhir").onclick = importFromFhir;
 $("btn-approve").onclick = approve;
 $("btn-audit").onclick = showAudit;
 $("btn-rescore").onclick = assess;

@@ -23,8 +23,8 @@ class VitalSigns(BaseModel):
     """Measured observations at triage. All optional so we can detect what is missing."""
 
     respiratory_rate: float | None = Field(None, description="breaths/min")
-    heart_rate: float | None = Field(None, description="beats/min")
-    systolic_bp: float | None = Field(None, description="mmHg")
+    heart_rate: float | None = Field(None, description="pulse / heart rate, beats/min")
+    systolic_bp: float | None = Field(None, description="systolic BP mmHg (used by TEWS)")
     temperature_c: float | None = Field(None, description="degrees Celsius")
     avpu: AVPU | None = Field(None, description="Alert/Voice/Pain/Unresponsive/Confused")
     mobility: Mobility | None = Field(None, description="walking/with_help/immobile")
@@ -32,6 +32,11 @@ class VitalSigns(BaseModel):
     # Additional investigations (not part of the 7 TEWS params, but can change priority)
     spo2: float | None = Field(None, description="oxygen saturation %")
     glucose_mmol: float | None = Field(None, description="finger-prick glucose mmol/L")
+    # Recorded per real nurse workflow (documentation fidelity); diastolic & weight are NOT
+    # scored by adult TEWS — systolic BP is. Pain score maps to the SATS pain discriminator.
+    diastolic_bp: float | None = Field(None, description="diastolic BP mmHg (recorded, not scored)")
+    weight_kg: float | None = Field(None, description="weight in kg (recorded, not scored in adults)")
+    pain_score: int | None = Field(None, ge=0, le=10, description="pain 0-10 → SATS pain discriminator")
     measured_at: datetime = Field(default_factory=_utcnow)
 
 

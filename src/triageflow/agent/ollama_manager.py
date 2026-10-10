@@ -65,6 +65,19 @@ def _model_present(name: str, available: list[str]) -> bool:
     return any(m == name or m.split(":")[0] == base for m in available)
 
 
+def resolve_model() -> tuple[str | None, bool]:
+    """Lightweight check for a ready model WITHOUT starting the server (so it never pops up
+    the Ollama app or blocks). Returns (model_name_or_None, using_fallback). Safe to call often."""
+    if not server_up():
+        return None, False
+    available = list_models()
+    if _model_present(settings.model, available):
+        return settings.model, False
+    if _model_present(settings.fallback_model, available):
+        return settings.fallback_model, True
+    return None, False
+
+
 def start_server(wait_s: float = 25.0) -> bool:
     """Make the Ollama server reachable, if it is not already.
 
@@ -77,7 +90,8 @@ def start_server(wait_s: float = 25.0) -> bool:
     started = False
     app_path = Path("/Applications/Ollama.app")
     if sys.platform == "darwin" and app_path.exists():
-        subprocess.run(["open", "-a", "Ollama"], stdout=subprocess.DEVNULL,
+        # -g = launch in the background, so it never steals focus / pops the window forward.
+        subprocess.run(["open", "-g", "-a", "Ollama"], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=False)
         started = True
     if not started:

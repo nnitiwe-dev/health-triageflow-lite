@@ -116,6 +116,16 @@ def additional_investigation_flags(vitals: VitalSigns) -> list[Evidence]:
             observed=f"{vitals.glucose_mmol} mmol/L", implies=R.Priority.RED,
             source="SATS Training Manual 2012, hypoglycaemia (glucose < 3 mmol/L) = emergency",
         ))
+    # Pain score (0-10) maps to the SATS pain discriminator. The nurse enters this directly
+    # (a structured assessment, not a free-text guess), so it contributes with its source.
+    if vitals.pain_score is not None and vitals.pain_score >= 4:
+        code = "severe_pain" if vitals.pain_score >= 7 else "moderate_pain"
+        d = R.DISCRIMINATORS_BY_CODE[code]
+        flags.append(Evidence(
+            kind="discriminator", parameter=code,
+            observed=f"{d.label} ({vitals.pain_score}/10)", band_label=d.label,
+            implies=d.level, source=d.source,
+        ))
     return flags
 
 

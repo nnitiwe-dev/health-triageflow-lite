@@ -25,3 +25,6 @@ venv/
 # test / cache
 .pytest_cache/
 .ruff_cache/
+
+# internal / working docs (kept locally, not for external reviewers)
+docs/DEMO.md

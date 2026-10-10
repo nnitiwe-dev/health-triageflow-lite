@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..core import sats_rules as R
 from ..core.audit import get_audit
+from ..core.config import settings
 from ..core.lexicon import suggest_codes
 from ..core.models import Encounter, VitalSigns
 from ..core.scoring import compute_tews, score_encounter
@@ -156,6 +157,29 @@ def suggest_discriminators(text: str) -> dict[str, Any]:
                      "source": d.source})
     return {"text": text, "candidates": hits,
             "note": "Candidates only — the nurse confirms before these affect any priority."}
+
+
+@mcp.tool()
+def fetch_fhir_vitals(patient_id: str) -> dict[str, Any]:
+    """Import a patient's vitals from the configured FHIR R4 server (EMR ingest), so the nurse
+    does not re-type what the EMR already holds. Returns {vitals, source} or a graceful error.
+    Disabled unless TRIAGEFLOW_FHIR_BASE_URL is set; the result is still nurse-confirmed."""
+    from ..agent import fhir_emr as F
+    if not F.fhir_enabled():
+        return {"ok": False, "error": "FHIR integration is off (set TRIAGEFLOW_FHIR_BASE_URL)."}
+    audit.record("tool_call", encounter_id=patient_id, tool="fetch_fhir_vitals",
+                 payload={"patient_id": patient_id})
+    try:
+        vitals = F.import_patient_vitals(patient_id)
+    except F.FHIRUnavailable as e:
+        audit.record("tool_error", encounter_id=patient_id, tool="fetch_fhir_vitals",
+                     payload={"error": str(e)})
+        return {"ok": False, "error": str(e)}
+    out = {"ok": True, "vitals": vitals.model_dump(mode="json"),
+           "source": f"FHIR Observation (patient {patient_id}) @ {settings.fhir_base_url}"}
+    audit.record("tool_result", encounter_id=patient_id, tool="fetch_fhir_vitals",
+                 payload={"source": out["source"]})
+    return out
 
 
 def build_server() -> FastMCP:

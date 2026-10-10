@@ -138,14 +138,31 @@ def _pattern(phrase: str) -> re.Pattern[str]:
     return re.compile(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", re.IGNORECASE)
 
 
+# Negation cues that, appearing just before a phrase (within the same clause), mean the
+# finding is a pertinent NEGATIVE and must not be surfaced — a classic triage-NLP pitfall
+# (e.g. "no PV bleed", "denies chest pain"). Clause-bounded so a comma/period resets it.
+_NEGATION = re.compile(
+    r"(?:\b(?:no|not|without|denies|denied|neg|ruled out|free of|nil)\b)[^.,;]{0,24}$",
+    re.IGNORECASE,
+)
+
+
+def _is_negated(text: str, start: int) -> bool:
+    return bool(_NEGATION.search(text[:start]))
+
+
 def suggest_codes(text: str) -> list[str]:
     """Return candidate discriminator codes whose phrases appear in ``text`` (deduped, ordered).
 
-    Uses word-boundary matching to avoid false positives from short abbreviations.
+    Word-boundary matching avoids false positives from short abbreviations; a light negation
+    check drops findings the note explicitly denies (so "no PV bleed" is not flagged).
     """
     t = (text or "").lower()
     hits: list[str] = []
     for code, phrases in SYMPTOM_LEXICON.items():
-        if any(_pattern(p).search(t) for p in phrases):
-            hits.append(code)
+        for p in phrases:
+            m = _pattern(p).search(t)
+            if m and not _is_negated(t, m.start()):
+                hits.append(code)
+                break
     return hits

@@ -45,9 +45,25 @@ The human gate on the irreversible action. `decision ∈ {approve, override}`; a
 priority that may now reach the queue.
 
 ### `suggest_discriminators(text) → {candidates[]}`
-Deterministic keyword/synonym map (`core/lexicon.py`, word-boundary matched) from free text to
-**candidate** SATS discriminator codes, each with its implied level and source. Candidates are
-for the nurse to **confirm** — they never auto-apply to a score.
+Deterministic keyword/synonym map (`core/lexicon.py`, word-boundary matched, negation-aware)
+from free text to **candidate** SATS discriminator codes, each with its implied level and
+source. Candidates are for the nurse to **confirm** — they never auto-apply to a score.
+
+### `fetch_fhir_vitals(patient_id) → {vitals, source}`  *(optional, EMR ingest)*
+Imports a patient's vital-signs Observations from the configured FHIR R4 server and maps them
+to our schema, so the nurse doesn't re-type what the EMR already holds. Disabled unless
+`TRIAGEFLOW_FHIR_BASE_URL` is set; the result is still nurse-confirmed. See the FHIR note below.
+
+## FHIR / EMR interoperability (and why it is a *tool*, not a borrowed MCP)
+
+We looked hard for a borrowed **FHIR MCP**: the maintained ones (`the-momentum`, `fhirhydrant`)
+assume OAuth2/SMART + Docker and won't cleanly hit an unauthenticated sandbox, and the one
+lightweight optional-auth option's repo is gone. Depending on any of them would risk the
+"clone-and-run" requirement. So EMR ingest is a reliable **first-party tool**
+(`fetch_fhir_vitals` + `agent/fhir_emr.py`) over plain FHIR REST, **off by default**, pointed at
+a configurable base URL. Our synthetic data is already FHIR R4 + LOINC, so a real write→read
+round trip works against any R4 server. **For a pilot:** point `TRIAGEFLOW_FHIR_BASE_URL` at the
+facility's in-country FHIR server (optionally fronted by a FHIR MCP) — same code path.
 
 ## Borrowed server: `filesystem` (tools used)
 

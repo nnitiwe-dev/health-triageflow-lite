@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com/3.4.13"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}" />
   <script>
     tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
       colors: { ink: '#0a0a0a', subtle: '#6b7280', line: '#ededed' } } } };
@@ -29,6 +29,7 @@
       <div class="flex items-center gap-2 text-[11px]">
         <span id="chip-model" class="chip">model: {{ model }}{% if using_fallback %} (fallback){% endif %}</span>
         <span class="chip">data: {{ data_region }}</span>
+        <span id="chip-fhir" class="chip hidden"></span>
         <span class="chip hidden sm:inline">MCP: {{ servers|join(' + ') }}</span>
         <span class="chip chip-warn">⚠ not a diagnosis</span>
       </div>
@@ -51,7 +52,7 @@
     <!-- Queue strip -->
     <section class="mb-5">
       <div class="flex items-center justify-between mb-2">
-        <h2 class="text-[12px] font-semibold uppercase tracking-wide text-subtle">Waiting queue · sorted by urgency</h2>
+        <h2 class="text-[12px] font-semibold uppercase tracking-wide text-subtle">Waiting queue · seen first <span class="normal-case">(#1, left)</span> → last</h2>
         <button id="btn-refresh-queue" class="text-[12px] text-subtle hover:text-ink">↻ regenerate</button>
       </div>
       <div id="queue" class="flex gap-2 overflow-x-auto pb-1"></div>
@@ -70,13 +71,18 @@
             <textarea id="f-complaint" rows="2" placeholder="e.g. central chest pain radiating to left arm"></textarea></label>
           <div class="grid grid-cols-3 gap-3">
             <label class="field"><span>Resp. rate</span><input id="f-rr" type="number" placeholder="/min"/></label>
-            <label class="field"><span>Heart rate</span><input id="f-hr" type="number" placeholder="bpm"/></label>
-            <label class="field"><span>Systolic BP</span><input id="f-sbp" type="number" placeholder="mmHg"/></label>
+            <label class="field"><span>Pulse rate (HR)</span><input id="f-hr" type="number" placeholder="bpm"/></label>
+            <label class="field"><span>Temp °C</span><input id="f-temp" type="number" step="0.1" placeholder="37.0"/></label>
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <label class="field"><span>Temp °C</span><input id="f-temp" type="number" step="0.1" placeholder="37.0"/></label>
+            <label class="field"><span>Systolic BP</span><input id="f-sbp" type="number" placeholder="mmHg"/></label>
+            <label class="field"><span>Diastolic BP</span><input id="f-dbp" type="number" placeholder="mmHg"/></label>
             <label class="field"><span>SpO₂ %</span><input id="f-spo2" type="number" placeholder="opt"/></label>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
             <label class="field"><span>Glucose</span><input id="f-glucose" type="number" step="0.1" placeholder="mmol/L"/></label>
+            <label class="field"><span>Weight (kg)</span><input id="f-weight" type="number" step="0.1" placeholder="opt"/></label>
+            <label class="field"><span>Pain (0–10)</span><input id="f-pain" type="number" min="0" max="10" placeholder="0–10"/></label>
           </div>
           <div class="grid grid-cols-3 gap-3">
             <label class="field"><span>AVPU</span>
@@ -87,9 +93,11 @@
               <label class="inline-flex items-center gap-2 h-[38px]"><input id="f-trauma" type="checkbox" class="h-4 w-4"/><span class="text-[13px] text-subtle">yes</span></label></label>
           </div>
           <div class="flex gap-2 pt-1">
-            <button id="btn-synthetic" class="btn border border-line">Load synthetic</button>
-            <button id="btn-assess" class="btn bg-ink text-white flex-1">Assess priority →</button>
+            <button id="btn-synthetic" class="btn border border-line flex-1">Load synthetic</button>
+            <button id="btn-fhir" class="btn border border-line flex-1 hidden">Import from EMR</button>
           </div>
+          <button id="btn-assess" class="btn bg-ink text-white w-full mt-2">Assess priority →</button>
+          <div id="fhir-note" class="hidden text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-md px-2 py-1.5"></div>
           <p class="text-[11px] text-subtle">Synthetic data only. The agent scores &amp; sequences; it never diagnoses, prescribes, or moves a patient.</p>
         </div>
       </section>
@@ -148,6 +156,6 @@
       </section>
     </div>
   </main>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v={{ asset_v }}"></script>
 </body>
 </html>
