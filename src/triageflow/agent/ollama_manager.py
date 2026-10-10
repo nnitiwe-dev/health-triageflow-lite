@@ -78,7 +78,7 @@ def resolve_model() -> tuple[str | None, bool]:
     return None, False
 
 
-def start_server(wait_s: float = 25.0) -> bool:
+def start_server(wait_s: float = 45.0) -> bool:
     """Make the Ollama server reachable, if it is not already.
 
     On macOS we prefer launching the Ollama.app (it manages a persistent server and owns

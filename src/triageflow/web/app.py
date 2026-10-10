@@ -50,9 +50,14 @@ def _sse(obj: dict[str, Any]) -> str:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    st = om.ensure_ready(pull=False)
-    _state["model"] = st.model
-    _state["using_fallback"] = st.using_fallback
+    # Fire Ollama's launch but DON'T block startup — a cold Ollama can take 30-60s to be
+    # ready, and the web server must come up immediately. The model resolves as soon as the
+    # server is warm (via the status poll / _maybe_refresh_model), clearing the banner on its own.
+    if not await asyncio.to_thread(om.server_up):
+        await asyncio.to_thread(lambda: om.start_server(wait_s=0))
+    model, using_fallback = await asyncio.to_thread(om.resolve_model)
+    _state["model"] = model
+    _state["using_fallback"] = using_fallback
     mcp = TriageMCP(include_filesystem=True)
     try:
         await mcp.connect()
@@ -61,7 +66,7 @@ async def _startup() -> None:
         _state["servers"] = []
     _state["mcp"] = mcp
     # TRIAGEFLOW_NO_LLM=1 runs the agent deterministically (fast demos/evals, or LLM-off sites).
-    agent_model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else st.model
+    agent_model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else model
     _state["llm_enabled"] = agent_model is not None
     _state["agent"] = TriageAgent(mcp, model=agent_model)
 
