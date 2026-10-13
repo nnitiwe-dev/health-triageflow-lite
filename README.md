@@ -47,19 +47,21 @@ conditions stay invisible until too late.
 
 Prerequisites: [`uv`](https://docs.astral.sh/uv/), [Node.js](https://nodejs.org) (for `npx`,
 which runs the borrowed filesystem MCP — the official prebuilt installer is the most reliable
-across platforms), and [Ollama](https://ollama.com/download) for the open-weights model. (If
-`npx`/Node isn't available, the agent still runs — it falls back to reading the protocol
+across platforms), and a local LLM runtime for the open-weights model —
+[Ollama](https://ollama.com/download) is the recommended one (see
+[Models & backends](#models--backends-pick-a-lighter-model-or-swap-the-runtime) for llama.cpp).
+(If `npx`/Node isn't available, the agent still runs — it falls back to reading the protocol
 locally.)
 
 ```bash
 uv run triageflow serve
 ```
 
-Open <http://127.0.0.1:8000>. On first run `uv` installs everything; the app detects
-Ollama and offers to download the model. Other commands:
+Open <http://127.0.0.1:8000>. On first run `uv` installs everything; the app detects your
+runtime (Ollama or llama.cpp) and offers to download the model. Other commands:
 
 ```bash
-uv run triageflow doctor        # check Ollama, model, and both MCP servers
+uv run triageflow doctor        # check the active backend, model, and both MCP servers
 uv run triageflow pull-model    # download the open-weights model (self-healing)
 uv run triageflow demo          # run one assessment in the terminal, tool calls + approval
 uv run python evals/run.py      # run the evaluation suite
@@ -194,7 +196,8 @@ free-running multi-agent loop. Full write-up in [ARCHITECTURE.md](ARCHITECTURE.m
   faster than writing our own.
 - **MCP client**: `langchain-mcp-adapters` `MultiServerMCPClient` launches both over stdio and
   loads their tools; the LangGraph nodes call them. Full catalog + call logic in [docs/MCP.md](docs/MCP.md).
-- **Open-weights model** via locally-managed Ollama — patient data never leaves the machine.
+- **Open-weights model** behind a pluggable, locally-managed runtime (Ollama or llama.cpp) —
+  patient data never leaves the machine.
 
 ## Data
 
@@ -214,7 +217,7 @@ reproducible generator produces the waiting queue and a deterioration series.
 - **Data / validation:** Pydantic v2 · **FHIR R4** + **LOINC** · SQLite + JSONL (audit log)
 - **External API (optional):** FHIR R4 server — in-country EMR, or HAPI sandbox for a demo
 - **Triage scale:** South African Triage Scale (SATS) Adult / TEWS
-- **Tooling:** `uv` · pytest (89 tests) · eval harness (`evals/`) · ruff · Apache-2.0
+- **Tooling:** `uv` · pytest (113 tests) · eval harness (`evals/`) · ruff · Apache-2.0
 
 ## Limitations
 

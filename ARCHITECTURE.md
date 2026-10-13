@@ -59,8 +59,8 @@ to reading/writing encounters against a real EMR — our data is already FHIR R4
 - **Human-in-the-loop** is a real graph `interrupt()`, not a prompt instruction: the graph
   cannot reach `finalize` without a resume carrying a named clinician's decision.
 - **Cost per run** is bounded and known: the clinical path is deterministic (0 tokens); the
-  LLM adds at most two short, capped (`num_predict=120`) generations, and the model is kept
-  warm (`keep_alive`). `TRIAGEFLOW_NO_LLM=1` makes it zero-token end to end.
+  LLM adds at most two short generations, each capped at `max_tokens=120`.
+  `TRIAGEFLOW_NO_LLM=1` makes it zero-token end to end.
 - **Data residency:** inference is local; synthetic data only; the data region is recorded in
   config and shown in the UI. Patient data never leaves the machine.
 - **Pluggable runtime:** the LLM is reached through an **OpenAI-compatible** client, so the
