@@ -9,9 +9,10 @@ from triageflow.core.config import settings
 
 
 def test_get_backend_selects_by_name():
+    # Explicit names are deterministic. ("auto"/None is environment-dependent — it picks an
+    # installed runtime — so it's covered separately by the monkeypatched tests below.)
     assert isinstance(get_backend("ollama"), OllamaBackend)
     assert isinstance(get_backend("llamacpp"), LlamaCppBackend)
-    assert isinstance(get_backend(None), OllamaBackend)  # default
 
 
 def test_make_chat_model_is_openai_compatible():
