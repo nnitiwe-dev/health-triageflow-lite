@@ -77,15 +77,19 @@ The LLM runs behind an **OpenAI-compatible** interface, so the runtime is plugga
   with download sizes; if your machine is low-powered, pick a **smaller** one (e.g. Qwen2.5
   **3B**) and it downloads + switches with live progress. Same from the terminal:
   `uv run triageflow pull-model qwen2.5:3b-instruct`.
-- **Ollama** (default, zero-friction): `uv run triageflow serve`. Downloads self-heal
-  (partial blobs cleared + retried).
+- **`auto` (default)** — `uv run triageflow serve` detects what's already installed and uses
+  it (**Ollama** or **llama.cpp**); only if neither is present does it set one up. No popups,
+  no redundant setup. All downloads **resume + retry** across network interruptions.
+- **Ollama** (zero-friction, best on macOS): downloads self-heal. Install from
+  [ollama.com](https://ollama.com/download).
 - **llama.cpp** (bare-metal, no daemon — good for constrained/offline boxes):
-  ```bash
-  brew install llama.cpp                       # provides `llama-server`
-  TRIAGEFLOW_LLM_BACKEND=llamacpp uv run triageflow serve
-  ```
-  GGUF models are downloaded from Hugging Face on demand (standard 7B, or a 3B / tiny 0.5B for
-  low-end hardware); `llama-server` is launched and health-checked automatically.
+  `TRIAGEFLOW_LLM_BACKEND=llamacpp uv run triageflow serve`. GGUF models download from Hugging
+  Face on demand (standard 7B, or a 3B / tiny 0.5B for low-end hardware); `llama-server` is
+  launched + health-checked automatically.
+  - **Windows:** the prebuilt `llama-server` is **auto-downloaded** on first run — nothing to install.
+  - **Linux:** install `llama-server` (package or build), then run.
+  - **macOS:** prefer **Ollama** (there is no official prebuilt llama.cpp binary; `brew install
+    llama.cpp` builds from source and can take a long time, especially on Intel Macs).
 
 `uv run triageflow doctor` shows the active backend, the resolved model, and the catalog.
 
