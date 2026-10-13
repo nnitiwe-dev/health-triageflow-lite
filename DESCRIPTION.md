@@ -21,7 +21,7 @@ second look — it never moves the patient itself.
 
 The defensibility idea is a strict split: the **clinical score is pure deterministic code**
 (zero run-to-run variance, a citation for every point), and the open-weights model
-(Qwen2.5-7B via local Ollama, Llama-3.2-3B fallback) only extracts candidate signs and writes
+(Qwen2.5-7B via a local runtime — Ollama or llama.cpp — Llama-3.2-3B fallback) only extracts candidate signs and writes
 the one-line handover. Every tool call and the named approval are written to an append-only
 audit log, so a priority can survive a clinical-audit question.
 

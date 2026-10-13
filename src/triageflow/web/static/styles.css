@@ -1,6 +1,9 @@
 /* Minimal, Vercel-like: white, thin lines, rounded cards, restrained type. */
 .chip { padding: 2px 8px; border: 1px solid #ededed; border-radius: 9999px; color: #6b7280; white-space: nowrap; }
 .chip-warn { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+.chip-select { border: none; background: transparent; font: inherit; color: #0a0a0a; padding: 0 2px;
+  outline: none; cursor: pointer; max-width: 220px; }
+.chip-select:focus { box-shadow: none; }
 
 .card { border: 1px solid #ededed; border-radius: 12px; background: #fff; overflow: hidden; }
 .card-h { padding: 10px 16px; border-bottom: 1px solid #ededed; font-size: 12px; font-weight: 600;

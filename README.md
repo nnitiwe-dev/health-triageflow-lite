@@ -45,18 +45,23 @@ conditions stay invisible until too late.
 
 ## Run it (one command)
 
-Prerequisites: [`uv`](https://docs.astral.sh/uv/), Node.js (for `npx`), and
-[Ollama](https://ollama.com/download) for the open-weights model.
+Prerequisites: [`uv`](https://docs.astral.sh/uv/), [Node.js](https://nodejs.org) (for `npx`,
+which runs the borrowed filesystem MCP — the official prebuilt installer is the most reliable
+across platforms), and a local LLM runtime for the open-weights model —
+[Ollama](https://ollama.com/download) is the recommended one (see
+[Models & backends](#models--backends-pick-a-lighter-model-or-swap-the-runtime) for llama.cpp).
+(If `npx`/Node isn't available, the agent still runs — it falls back to reading the protocol
+locally.)
 
 ```bash
 uv run triageflow serve
 ```
 
-Open <http://127.0.0.1:8000>. On first run `uv` installs everything; the app detects
-Ollama and offers to download the model. Other commands:
+Open <http://127.0.0.1:8000>. On first run `uv` installs everything; the app detects your
+runtime (Ollama or llama.cpp) and offers to download the model. Other commands:
 
 ```bash
-uv run triageflow doctor        # check Ollama, model, and both MCP servers
+uv run triageflow doctor        # check the active backend, model, and both MCP servers
 uv run triageflow pull-model    # download the open-weights model (self-healing)
 uv run triageflow demo          # run one assessment in the terminal, tool calls + approval
 uv run python evals/run.py      # run the evaluation suite
@@ -64,14 +69,34 @@ uv run python -m pytest         # unit tests (pins the SATS/TEWS table)
 ```
 
 **No GPU needed.** The clinical priority is computed by deterministic code (instant); the
-open-weights model (Qwen2.5-7B-Instruct, fallback Llama-3.2-3B) only extracts candidate
-signs from free text and writes the one-line handover. Set `TRIAGEFLOW_NO_LLM=1` to run the
-agent fully deterministically (fast demos / LLM-off sites).
+open-weights model only extracts candidate signs from free text and writes the one-line
+handover. Set `TRIAGEFLOW_NO_LLM=1` to run the agent fully deterministically (fast demos /
+LLM-off sites).
 
-### Self-healing model download
-If a download fails or is interrupted, click **Clear & re-download** in the UI (or
-`uv run triageflow pull-model --force-clean`). It wipes partial blobs and a broken manifest,
-then re-pulls cleanly — a bad download can never wedge the app.
+### Models & backends (pick a lighter model, or swap the runtime)
+
+The LLM runs behind an **OpenAI-compatible** interface, so the runtime is pluggable
+(`TRIAGEFLOW_LLM_BACKEND`), and the agent code never changes.
+
+- **Switch models from the UI** — the **model:** menu in the header lists a small catalog
+  with download sizes; if your machine is low-powered, pick a **smaller** one (e.g. Qwen2.5
+  **3B**) and it downloads + switches with live progress. Same from the terminal:
+  `uv run triageflow pull-model qwen2.5:3b-instruct`.
+- **`auto` (default)** — `uv run triageflow serve` detects what's already installed and uses
+  it (**Ollama** or **llama.cpp**); only if neither is present does it set one up. No popups,
+  no redundant setup. All downloads **resume + retry** across network interruptions.
+- **Ollama** (zero-friction, best on macOS): downloads self-heal. Install from
+  [ollama.com](https://ollama.com/download).
+- **llama.cpp** (bare-metal, no daemon — good for constrained/offline boxes):
+  `TRIAGEFLOW_LLM_BACKEND=llamacpp uv run triageflow serve`. GGUF models download from Hugging
+  Face on demand (standard 7B, or a 3B / tiny 0.5B for low-end hardware); `llama-server` is
+  launched + health-checked automatically.
+  - **Windows:** the prebuilt `llama-server` is **auto-downloaded** on first run — nothing to install.
+  - **Linux:** install `llama-server` (package or build), then run.
+  - **macOS:** prefer **Ollama** (there is no official prebuilt llama.cpp binary; `brew install
+    llama.cpp` builds from source and can take a long time, especially on Intel Macs).
+
+`uv run triageflow doctor` shows the active backend, the resolved model, and the catalog.
 
 ### Optional: import vitals from a FHIR EMR
 Off by default (the app runs fully local, no network — data residency). Point it at a FHIR R4
@@ -171,7 +196,8 @@ free-running multi-agent loop. Full write-up in [ARCHITECTURE.md](ARCHITECTURE.m
   faster than writing our own.
 - **MCP client**: `langchain-mcp-adapters` `MultiServerMCPClient` launches both over stdio and
   loads their tools; the LangGraph nodes call them. Full catalog + call logic in [docs/MCP.md](docs/MCP.md).
-- **Open-weights model** via locally-managed Ollama — patient data never leaves the machine.
+- **Open-weights model** behind a pluggable, locally-managed runtime (Ollama or llama.cpp) —
+  patient data never leaves the machine.
 
 ## Data
 
@@ -185,13 +211,13 @@ reproducible generator produces the waiting queue and a deterioration series.
 
 - **Language:** Python 3.11
 - **Agent / orchestration:** LangGraph (`StateGraph`, `MemorySaver` checkpointer, `interrupt()`)
-- **LLM:** Qwen2.5-7B-Instruct (fallback Llama-3.2-3B) — **open-weights, local via Ollama** (`langchain-ollama`)
+- **LLM:** open-weights, local, behind an **OpenAI-compatible** client (`langchain-openai`) — pluggable backend: **Ollama** (default) or **llama.cpp** (`llama-server`); models Qwen2.5 7B/3B, Llama-3.2-3B
 - **MCP:** `mcp` (FastMCP) for our server · `langchain-mcp-adapters` (MultiServerMCPClient) client · borrowed `@modelcontextprotocol/server-filesystem` (npx)
 - **Web:** FastAPI · Jinja2 · Tailwind · vanilla JS (SSE streaming) · Uvicorn
 - **Data / validation:** Pydantic v2 · **FHIR R4** + **LOINC** · SQLite + JSONL (audit log)
 - **External API (optional):** FHIR R4 server — in-country EMR, or HAPI sandbox for a demo
 - **Triage scale:** South African Triage Scale (SATS) Adult / TEWS
-- **Tooling:** `uv` · pytest (89 tests) · eval harness (`evals/`) · ruff · Apache-2.0
+- **Tooling:** `uv` · pytest (113 tests) · eval harness (`evals/`) · ruff · Apache-2.0
 
 ## Limitations
 

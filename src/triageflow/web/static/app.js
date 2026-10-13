@@ -213,14 +213,28 @@ async function loadSynthetic() {
   fillForm(enc);
 }
 
-// ---- model download (self-healing) -----------------------------------------
-async function pullModel(forceClean) {
+// ---- model switcher + download ---------------------------------------------
+let _catalogKey = "";
+function renderModelSelect(s) {
+  const cat = s.catalog || [];
+  const key = JSON.stringify(cat.map(c => [c.id, c.installed])) + "|" + (s.model || "");
+  if (key === _catalogKey) return;        // avoid clobbering an open dropdown on every poll
+  _catalogKey = key;
+  const sel = $("model-select");
+  sel.innerHTML = cat.map(c => {
+    const tag = c.installed ? "✓" : `⤓ ${c.size_gb}GB`;
+    const active = (c.id === s.model) ? " (active)" : "";
+    return `<option value="${c.id}" ${c.id === s.model ? "selected" : ""}>${c.label} · ${tag}${active}</option>`;
+  }).join("") || `<option>${s.model || "none"}</option>`;
+}
+
+async function selectModel(modelId) {
+  $("model-banner").classList.remove("hidden");
   $("pull-progress").classList.remove("hidden");
-  $("pull-progress").textContent = "starting…";
-  $("btn-pull").disabled = true; $("btn-repair").disabled = true;
-  const resp = await fetch("/api/model/pull", {
+  $("pull-progress").textContent = "preparing " + modelId + "…";
+  const resp = await fetch("/api/model/select", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ force_clean: !!forceClean }),
+    body: JSON.stringify({ model: modelId }),
   });
   const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = "";
   while (true) {
@@ -231,24 +245,29 @@ async function pullModel(forceClean) {
       const line = p.split("\n").find(l => l.startsWith("data: ")); if (!line) continue;
       const ev = JSON.parse(line.slice(6));
       if (ev.type === "progress") $("pull-progress").textContent = ev.message;
+      else if (ev.type === "error") $("pull-progress").textContent = "error: " + ev.message;
       else if (ev.type === "done") {
-        $("pull-progress").textContent = ev.message || "done";
-        if (ev.model) { await refreshStatus(); setTimeout(()=>$("model-banner").classList.add("hidden"), 1500); }
+        $("pull-progress").textContent = "ready: " + (ev.model || modelId);
+        _catalogKey = "";
+        await refreshStatus();
+        setTimeout(() => { $("model-banner").classList.add("hidden"); $("pull-progress").classList.add("hidden"); }, 1500);
       }
     }
   }
-  $("btn-pull").disabled = false; $("btn-repair").disabled = false;
 }
 
 let _statusTimer = null;
 async function refreshStatus() {
   let s;
   try { s = await (await fetch("/api/status")).json(); } catch { return; }
-  $("chip-model").textContent = `model: ${s.model || "none"}${s.using_fallback ? " (fallback)" : ""}`;
+  renderModelSelect(s);
   const ready = !!s.model_ready;
   // Auto-hide the banner the moment a model is ready; poll until then so a late/cold-starting
-  // Ollama clears it on its own (no manual reload, no falsely-stuck banner).
+  // runtime clears it on its own (no manual reload, no falsely-stuck banner).
   $("model-banner").classList.toggle("hidden", ready);
+  if (!ready && s.backend_hint) {
+    $("banner-msg").innerHTML = `<b>${s.backend}</b> backend — ${s.backend_hint} The agent runs deterministically meanwhile; pick a model from the <b>model:</b> menu (a smaller one on a low-powered box).`;
+  }
   if (!ready && !_statusTimer) _statusTimer = setInterval(refreshStatus, 3000);
   if (ready && _statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
   if (s.fhir && s.fhir.enabled) {
@@ -257,6 +276,13 @@ async function refreshStatus() {
     $("chip-fhir").textContent = "FHIR: " + host;
     $("chip-fhir").classList.remove("hidden");
   }
+  window._status = s;
+}
+
+function downloadDefaultModel() {
+  const cat = (window._status && window._status.catalog) || [];
+  const std = cat.find(c => c.tier === "standard") || cat[0];
+  if (std) selectModel(std.id);
 }
 
 async function importFromFhir() {
@@ -292,7 +318,7 @@ $("btn-approve").onclick = approve;
 $("btn-audit").onclick = showAudit;
 $("btn-rescore").onclick = assess;
 $("btn-refresh-queue").onclick = loadQueue;
-$("btn-pull").onclick = () => pullModel(false);
-$("btn-repair").onclick = () => pullModel(true);
+$("btn-pull").onclick = downloadDefaultModel;
+$("model-select").onchange = (e) => selectModel(e.target.value);
 $("f-id").value = newId();
 loadQueue(); refreshStatus();

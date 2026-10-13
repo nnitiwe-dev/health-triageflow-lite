@@ -59,10 +59,14 @@ to reading/writing encounters against a real EMR — our data is already FHIR R4
 - **Human-in-the-loop** is a real graph `interrupt()`, not a prompt instruction: the graph
   cannot reach `finalize` without a resume carrying a named clinician's decision.
 - **Cost per run** is bounded and known: the clinical path is deterministic (0 tokens); the
-  LLM adds at most two short, capped (`num_predict=120`) generations, and the model is kept
-  warm (`keep_alive`). `TRIAGEFLOW_NO_LLM=1` makes it zero-token end to end.
-- **Data residency:** inference is local (Ollama); synthetic data only; the data region is
-  recorded in config and shown in the UI. Patient data never leaves the machine.
+  LLM adds at most two short generations, each capped at `max_tokens=120`.
+  `TRIAGEFLOW_NO_LLM=1` makes it zero-token end to end.
+- **Data residency:** inference is local; synthetic data only; the data region is recorded in
+  config and shown in the UI. Patient data never leaves the machine.
+- **Pluggable runtime:** the LLM is reached through an **OpenAI-compatible** client, so the
+  backend (`TRIAGEFLOW_LLM_BACKEND`) is swappable with no code change — **Ollama** (default) or
+  **llama.cpp** `llama-server`. Each backend owns its server lifecycle + model download and
+  exposes a catalog so a nurse can switch to a lighter model on a low-powered box.
 
 ## Layout
 
@@ -71,7 +75,7 @@ src/triageflow/
   core/        sats_rules, scoring, models, validation, audit, config   ← deterministic heart
   data/        fhir (LOINC), synthetic generator                        ← EMR-shaped synthetic
   mcp/         server.py                                                 ← our MCP server
-  agent/       graph.py (LangGraph), mcp_client.py, ollama_manager.py    ← orchestration
+  agent/       graph.py (LangGraph), mcp_client.py, llm_backend + ollama/llamacpp backends  ← orchestration
   web/         app.py (FastAPI) + templates/ + static/                   ← nurse workspace
 protocols/     sats_adult.md                                            ← cited evidence (borrowed MCP serves this)
 tests/         pins the TEWS table + final-priority logic

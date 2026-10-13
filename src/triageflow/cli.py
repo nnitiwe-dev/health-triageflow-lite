@@ -14,15 +14,18 @@ import sys
 
 
 def _doctor() -> int:
-    from .agent import ollama_manager as om
-    from .core.config import settings
-    print(f"Model (configured): {settings.model}  | fallback: {settings.fallback_model}")
-    st = om.ensure_ready(pull=False, on_progress=lambda s: print("  …", s))
-    print(f"Ollama installed : {st.ollama_installed}")
-    print(f"Ollama server up : {st.server_up}")
-    print(f"Local models     : {st.available_models}")
+    from .agent.llm_backend import get_backend
+    backend = get_backend()
+    backend.ensure_server(wait_s=45)
+    st = backend.status()
+    print(f"LLM backend      : {st.backend}")
+    print(f"Runtime installed: {st.runtime_installed}")
+    print(f"Server up        : {st.server_up}")
     print(f"Resolved model   : {st.model}  (fallback={st.using_fallback})")
-    print(f"Status           : {st.message}")
+    print(f"Status           : {st.message}" + (f"  — {st.hint}" if st.hint else ""))
+    print("Model catalog    :")
+    for m in st.catalog:
+        print(f"   [{'✓' if m.installed else ' '}] {m.id:28} {m.label}  (~{m.size_gb} GB)")
 
     async def _mcp():
         from .agent.mcp_client import TriageMCP
@@ -63,27 +66,36 @@ def _seed_fhir(n: int) -> int:
     return 0
 
 
-def _pull(force_clean: bool) -> int:
-    from .agent import ollama_manager as om
-    st = om.ensure_ready(pull=True, force_clean=force_clean,
-                         on_progress=lambda s: print("  …", s))
-    print(st.message)
-    return 0 if st.model else 1
+def _pull(model_id: str | None) -> int:
+    from .agent.llm_backend import get_backend
+    from .core.config import settings
+    backend = get_backend()
+    if not backend.runtime_installed():
+        print(backend.status().hint or "runtime not installed")
+        return 1
+    target = model_id or (settings.model if backend.name == "ollama"
+                          else settings.llamacpp_default_model)
+    print(f"Downloading '{target}' via {backend.name} …")
+    ok = backend.pull_model(target, on_progress=lambda s: print("  …", s))
+    print("done." if ok else "FAILED.")
+    return 0 if ok else 1
 
 
 def _demo() -> int:
-    from .agent import ollama_manager as om
     from .agent.graph import TriageAgent
+    from .agent.llm_backend import get_backend
     from .agent.mcp_client import TriageMCP
     from .data import synthetic
 
     async def run():
         import os
-        st = om.ensure_ready(pull=False)
+        backend = get_backend()
+        backend.ensure_server(wait_s=45)
+        model_name, _ = backend.resolve_model()
         mcp = TriageMCP(include_filesystem=True)
         await mcp.connect()
-        model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else st.model
-        agent = TriageAgent(mcp, model=model)
+        model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else model_name
+        agent = TriageAgent(mcp, model=model, chat_base_url=backend.chat_base_url())
         enc = synthetic.make_encounter("severe", seed=99).model_dump(mode="json")
         enc["encounter_id"] = "DEMO-1"
         print(f"\nEncounter {enc['encounter_id']}: {enc['presenting_complaint']}")
@@ -120,8 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--host", default=settings.host)
     s.add_argument("--port", type=int, default=settings.port)
     sub.add_parser("doctor", help="check the stack")
-    pm = sub.add_parser("pull-model", help="download the open-weights model")
-    pm.add_argument("--force-clean", action="store_true", help="clear a broken download first")
+    pm = sub.add_parser("pull-model", help="download an open-weights model (default: configured one)")
+    pm.add_argument("model", nargs="?", default=None, help="model id from the backend catalog")
     sub.add_parser("demo", help="run one assessment in the terminal")
     sf = sub.add_parser("seed-fhir", help="push synthetic patients to the configured FHIR server")
     sf.add_argument("-n", type=int, default=3, help="how many patients to seed")
@@ -132,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "seed-fhir":
         return _seed_fhir(args.n)
     if args.cmd == "pull-model":
-        return _pull(args.force_clean)
+        return _pull(args.model)
     if args.cmd == "demo":
         return _demo()
     # default: serve

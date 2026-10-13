@@ -97,7 +97,7 @@ approver — the gate is structural, not a prompt instruction.
 
 **Determinism & cost:** `score_triage` / `check_deterioration` are pure functions (0 tokens,
 identical output for identical input). The only LLM usage is candidate refinement and the
-one-line handover, both capped (`num_predict=120`) and skippable (`TRIAGEFLOW_NO_LLM=1`).
+one-line handover, both capped (`max_tokens=120`) and skippable (`TRIAGEFLOW_NO_LLM=1`).
 
 ## Reuse by other clients
 

@@ -59,18 +59,18 @@ def _t(step: str, server: str, summary: str, **extra: Any) -> dict[str, Any]:
 
 
 class TriageAgent:
-    def __init__(self, mcp: TriageMCP, model: str | None = None, temperature: float = 0.0):
+    def __init__(self, mcp: TriageMCP, model: str | None = None, temperature: float = 0.0,
+                 chat_base_url: str | None = None):
         self.mcp = mcp
         self.model = model
         self._llm = None
-        if model:
+        # Backend-agnostic: talk to whatever OpenAI-compatible server (Ollama / llama.cpp /
+        # vLLM) the chosen backend exposes. model=None => deterministic-only (no LLM calls).
+        if model and chat_base_url:
             try:
-                from langchain_ollama import ChatOllama
-                # Cap generation + keep the model warm so narration stays snappy on CPU.
-                # (The clinical priority itself is deterministic and instant — this LLM only
-                #  refines candidate signs and writes the one-line handover.)
-                self._llm = ChatOllama(model=model, temperature=temperature,
-                                       num_predict=120, keep_alive="10m")
+                from .llm_backend import make_chat_model
+                self._llm = make_chat_model(chat_base_url, model, temperature=temperature,
+                                            max_tokens=120)
             except Exception:
                 self._llm = None
         self.graph = self._build()
