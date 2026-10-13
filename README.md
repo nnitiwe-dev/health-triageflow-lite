@@ -45,8 +45,11 @@ conditions stay invisible until too late.
 
 ## Run it (one command)
 
-Prerequisites: [`uv`](https://docs.astral.sh/uv/), Node.js (for `npx`), and
-[Ollama](https://ollama.com/download) for the open-weights model.
+Prerequisites: [`uv`](https://docs.astral.sh/uv/), [Node.js](https://nodejs.org) (for `npx`,
+which runs the borrowed filesystem MCP — the official prebuilt installer is the most reliable
+across platforms), and [Ollama](https://ollama.com/download) for the open-weights model. (If
+`npx`/Node isn't available, the agent still runs — it falls back to reading the protocol
+locally.)
 
 ```bash
 uv run triageflow serve
