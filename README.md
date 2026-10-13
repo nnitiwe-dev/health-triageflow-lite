@@ -64,14 +64,30 @@ uv run python -m pytest         # unit tests (pins the SATS/TEWS table)
 ```
 
 **No GPU needed.** The clinical priority is computed by deterministic code (instant); the
-open-weights model (Qwen2.5-7B-Instruct, fallback Llama-3.2-3B) only extracts candidate
-signs from free text and writes the one-line handover. Set `TRIAGEFLOW_NO_LLM=1` to run the
-agent fully deterministically (fast demos / LLM-off sites).
+open-weights model only extracts candidate signs from free text and writes the one-line
+handover. Set `TRIAGEFLOW_NO_LLM=1` to run the agent fully deterministically (fast demos /
+LLM-off sites).
 
-### Self-healing model download
-If a download fails or is interrupted, click **Clear & re-download** in the UI (or
-`uv run triageflow pull-model --force-clean`). It wipes partial blobs and a broken manifest,
-then re-pulls cleanly — a bad download can never wedge the app.
+### Models & backends (pick a lighter model, or swap the runtime)
+
+The LLM runs behind an **OpenAI-compatible** interface, so the runtime is pluggable
+(`TRIAGEFLOW_LLM_BACKEND`), and the agent code never changes.
+
+- **Switch models from the UI** — the **model:** menu in the header lists a small catalog
+  with download sizes; if your machine is low-powered, pick a **smaller** one (e.g. Qwen2.5
+  **3B**) and it downloads + switches with live progress. Same from the terminal:
+  `uv run triageflow pull-model qwen2.5:3b-instruct`.
+- **Ollama** (default, zero-friction): `uv run triageflow serve`. Downloads self-heal
+  (partial blobs cleared + retried).
+- **llama.cpp** (bare-metal, no daemon — good for constrained/offline boxes):
+  ```bash
+  brew install llama.cpp                       # provides `llama-server`
+  TRIAGEFLOW_LLM_BACKEND=llamacpp uv run triageflow serve
+  ```
+  GGUF models are downloaded from Hugging Face on demand (standard 7B, or a 3B / tiny 0.5B for
+  low-end hardware); `llama-server` is launched and health-checked automatically.
+
+`uv run triageflow doctor` shows the active backend, the resolved model, and the catalog.
 
 ### Optional: import vitals from a FHIR EMR
 Off by default (the app runs fully local, no network — data residency). Point it at a FHIR R4
@@ -185,7 +201,7 @@ reproducible generator produces the waiting queue and a deterioration series.
 
 - **Language:** Python 3.11
 - **Agent / orchestration:** LangGraph (`StateGraph`, `MemorySaver` checkpointer, `interrupt()`)
-- **LLM:** Qwen2.5-7B-Instruct (fallback Llama-3.2-3B) — **open-weights, local via Ollama** (`langchain-ollama`)
+- **LLM:** open-weights, local, behind an **OpenAI-compatible** client (`langchain-openai`) — pluggable backend: **Ollama** (default) or **llama.cpp** (`llama-server`); models Qwen2.5 7B/3B, Llama-3.2-3B
 - **MCP:** `mcp` (FastMCP) for our server · `langchain-mcp-adapters` (MultiServerMCPClient) client · borrowed `@modelcontextprotocol/server-filesystem` (npx)
 - **Web:** FastAPI · Jinja2 · Tailwind · vanilla JS (SSE streaming) · Uvicorn
 - **Data / validation:** Pydantic v2 · **FHIR R4** + **LOINC** · SQLite + JSONL (audit log)

@@ -13,6 +13,7 @@ import os
 import queue
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..agent import fhir_emr
-from ..agent import ollama_manager as om
 from ..agent.graph import TriageAgent
+from ..agent.llm_backend import get_backend
 from ..agent.mcp_client import TriageMCP
 from ..core.audit import get_audit
 from ..core.config import settings
@@ -50,12 +51,14 @@ def _sse(obj: dict[str, Any]) -> str:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    # Fire Ollama's launch but DON'T block startup — a cold Ollama can take 30-60s to be
+    backend = get_backend()
+    _state["backend"] = backend
+    # Fire the runtime launch but DON'T block startup — a cold server can take 30-60s to be
     # ready, and the web server must come up immediately. The model resolves as soon as the
-    # server is warm (via the status poll / _maybe_refresh_model), clearing the banner on its own.
-    if not await asyncio.to_thread(om.server_up):
-        await asyncio.to_thread(lambda: om.start_server(wait_s=0))
-    model, using_fallback = await asyncio.to_thread(om.resolve_model)
+    # server is warm (via the status poll), clearing the banner on its own.
+    if not await asyncio.to_thread(backend.server_up):
+        await asyncio.to_thread(lambda: backend.ensure_server(wait_s=0))
+    model, using_fallback = await asyncio.to_thread(backend.resolve_model)
     _state["model"] = model
     _state["using_fallback"] = using_fallback
     mcp = TriageMCP(include_filesystem=True)
@@ -65,10 +68,15 @@ async def _startup() -> None:
     except Exception:
         _state["servers"] = []
     _state["mcp"] = mcp
+    _rebuild_agent(model)
+
+
+def _rebuild_agent(model: str | None) -> None:
     # TRIAGEFLOW_NO_LLM=1 runs the agent deterministically (fast demos/evals, or LLM-off sites).
     agent_model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else model
     _state["llm_enabled"] = agent_model is not None
-    _state["agent"] = TriageAgent(mcp, model=agent_model)
+    base = _state["backend"].chat_base_url() if _state.get("backend") else None
+    _state["agent"] = TriageAgent(_state["mcp"], model=agent_model, chat_base_url=base)
 
 
 def _agent() -> TriageAgent:
@@ -76,17 +84,15 @@ def _agent() -> TriageAgent:
 
 
 def _maybe_refresh_model() -> None:
-    """Self-heal: if no model was ready at startup, re-check — lightweight. Lets a model that
-    becomes available later clear the banner without a restart. Does NOT start the Ollama
-    server (so it never pops up the app or blocks the event loop); the one-time start happens
-    at startup only."""
-    if os.environ.get("TRIAGEFLOW_NO_LLM") or _state.get("model"):
+    """Self-heal: if no model was ready at startup, re-check — lightweight (no server start,
+    no event-loop block). Lets a model that becomes available later clear the banner itself."""
+    if os.environ.get("TRIAGEFLOW_NO_LLM") or _state.get("model") or not _state.get("backend"):
         return
-    model, using_fallback = om.resolve_model()
+    model, using_fallback = _state["backend"].resolve_model()
     if model:
         _state["model"] = model
         _state["using_fallback"] = using_fallback
-        _state["agent"] = TriageAgent(_state["mcp"], model=model)
+        _rebuild_agent(model)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -104,13 +110,80 @@ async def index(request: Request):
 @app.get("/api/status")
 async def status():
     await asyncio.to_thread(_maybe_refresh_model)
+    backend = _state.get("backend")
+    bs = await asyncio.to_thread(backend.status) if backend else None
     return {
         "model": _state["model"], "using_fallback": _state["using_fallback"],
         "servers": _state["servers"], "data_region": settings.data_region,
-        "ollama_models": om.list_models(),
         "model_ready": _state["model"] is not None,
+        "backend": backend.name if backend else None,
+        "runtime_installed": bs.runtime_installed if bs else False,
+        "backend_hint": bs.hint if bs else "",
+        "catalog": [asdict(o) for o in (bs.catalog if bs else [])],
         "fhir": {"enabled": fhir_emr.fhir_enabled(), "base_url": settings.fhir_base_url or None},
     }
+
+
+@app.get("/api/models")
+async def list_models_endpoint():
+    backend = _state["backend"]
+    bs = await asyncio.to_thread(backend.status)
+    return {"backend": backend.name, "active": _state["model"], "hint": bs.hint,
+            "runtime_installed": bs.runtime_installed,
+            "catalog": [asdict(o) for o in bs.catalog]}
+
+
+@app.post("/api/model/select")
+async def model_select(request: Request):
+    """Switch the active model — downloading it first if needed (streamed progress).
+    Works for both backends; for llama.cpp this restarts llama-server with the new GGUF."""
+    body = await request.json()
+    model_id = (body or {}).get("model")
+    backend = _state["backend"]
+    if not model_id:
+        return JSONResponse({"error": "model is required"}, status_code=400)
+    if not await asyncio.to_thread(backend.runtime_installed):
+        return JSONResponse({"error": (await asyncio.to_thread(backend.status)).hint
+                             or "runtime not installed"}, status_code=400)
+
+    q: queue.Queue[str | None] = queue.Queue()
+
+    def worker():
+        try:
+            backend.ensure_server(wait_s=0)
+            if not backend.is_installed(model_id):
+                q.put(f"preparing {model_id}…")
+                if not backend.pull_model(model_id, on_progress=lambda s: q.put(s)):
+                    q.put("__ERR__download failed")
+                    q.put(None)
+                    return
+            q.put("activating model…")
+            backend.set_active_model(model_id)
+            q.put("__DONE__" + json.dumps({"model": backend.active_model()}))
+        except Exception as e:
+            q.put(f"__ERR__{type(e).__name__}: {e}")
+        q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    async def gen():
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item is None:
+                break
+            if item.startswith("__DONE__"):
+                data = json.loads(item[len("__DONE__"):])
+                if data.get("model"):
+                    _state["model"] = data["model"]
+                    _state["using_fallback"] = False
+                    _rebuild_agent(data["model"])
+                yield _sse({"type": "done", **data})
+            elif item.startswith("__ERR__"):
+                yield _sse({"type": "error", "message": item[len("__ERR__"):]})
+            else:
+                yield _sse({"type": "progress", "message": item})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.get("/api/fhir/status")
@@ -248,39 +321,4 @@ async def encounter_audit(encounter_id: str):
     return audit.trail(encounter_id)
 
 
-@app.post("/api/model/pull")
-async def model_pull(request: Request):
-    """Download the model, streaming progress. Self-heals: clears partial downloads and
-    retries. Pass {"force_clean": true} to wipe a broken download and start fresh."""
-    body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
-    force_clean = bool(body.get("force_clean"))
-
-    q: queue.Queue[str | None] = queue.Queue()
-
-    def worker():
-        st = om.ensure_ready(pull=True, force_clean=force_clean,
-                             on_progress=lambda s: q.put(s))
-        q.put(f"__DONE__{json.dumps({'model': st.model, 'message': st.message})}")
-        q.put(None)
-
-    threading.Thread(target=worker, daemon=True).start()
-
-    async def gen():
-        while True:
-            item = await asyncio.to_thread(q.get)
-            if item is None:
-                break
-            if item.startswith("__DONE__"):
-                data = json.loads(item[len("__DONE__"):])
-                if data.get("model"):
-                    _state["model"] = data["model"]
-                    _state["agent"] = TriageAgent(_state["mcp"], model=data["model"])
-                yield _sse({"type": "done", **data})
-            else:
-                yield _sse({"type": "progress", "message": item})
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+# Model download + switching is handled by /api/model/select (download-if-needed, then switch).

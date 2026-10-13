@@ -36,13 +36,25 @@ def _normalize_ollama_host(raw: str) -> str:
 
 @dataclass
 class Settings:
-    # Open-weights model served locally by Ollama (data never leaves the machine).
+    # Which local open-weights runtime to use: "ollama" (default, zero-friction) or
+    # "llamacpp" (llama.cpp's llama-server, OpenAI-compatible). Both keep data on the machine.
+    llm_backend: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLM_BACKEND", "ollama").lower())
+
+    # Open-weights model served locally (data never leaves the machine).
     model: str = field(default_factory=lambda: _env("TRIAGEFLOW_MODEL", "qwen2.5:7b-instruct"))
     fallback_model: str = field(default_factory=lambda: _env("TRIAGEFLOW_FALLBACK_MODEL", "llama3.2:3b"))
     # Use 127.0.0.1 (not "localhost"): the Ollama app binds IPv4 only, and "localhost" can
     # resolve to IPv6 (::1) first. Normalised so a bare/0.0.0.0 OLLAMA_HOST still works.
     ollama_host: str = field(default_factory=lambda: _normalize_ollama_host(
         _env("OLLAMA_HOST", "http://127.0.0.1:11434")))
+
+    # llama.cpp backend settings (only used when llm_backend == "llamacpp").
+    llamacpp_bin: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLAMACPP_BIN", "llama-server"))
+    llamacpp_host: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLAMACPP_HOST", "127.0.0.1"))
+    llamacpp_port: int = field(default_factory=lambda: int(_env("TRIAGEFLOW_LLAMACPP_PORT", "8080")))
+    llamacpp_ctx: int = field(default_factory=lambda: int(_env("TRIAGEFLOW_LLAMACPP_CTX", "4096")))
+    llamacpp_ngl: int = field(default_factory=lambda: int(_env("TRIAGEFLOW_LLAMACPP_NGL", "999")))
+    llamacpp_default_model: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLAMACPP_MODEL", "qwen2.5-7b-instruct-q4"))
 
     # Data residency guard — recorded in the audit log and shown in the UI.
     data_region: str = field(default_factory=lambda: _env("TRIAGEFLOW_DATA_REGION", "local-only"))
@@ -56,6 +68,9 @@ class Settings:
     home: Path = field(default_factory=lambda: Path(_env("TRIAGEFLOW_HOME", str(Path.home() / ".triageflow"))))
     protocols_dir: Path = field(default_factory=lambda: Path(
         _env("TRIAGEFLOW_PROTOCOLS", str(Path(__file__).resolve().parents[3] / "protocols"))))
+    # Where llama.cpp GGUF files are stored/downloaded.
+    models_dir: Path = field(default_factory=lambda: Path(
+        _env("TRIAGEFLOW_MODELS_DIR", str(Path.home() / ".triageflow" / "models"))))
 
     # Web
     host: str = field(default_factory=lambda: _env("TRIAGEFLOW_WEB_HOST", "127.0.0.1"))

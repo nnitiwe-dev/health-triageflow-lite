@@ -27,7 +27,10 @@
         </div>
       </div>
       <div class="flex items-center gap-2 text-[11px]">
-        <span id="chip-model" class="chip">model: {{ model }}{% if using_fallback %} (fallback){% endif %}</span>
+        <span class="chip flex items-center gap-1" title="Switch model — pick a lighter one if the standard is too heavy">
+          <span class="text-subtle">model:</span>
+          <select id="model-select" class="chip-select"><option>{{ model }}</option></select>
+        </span>
         <span class="chip">data: {{ data_region }}</span>
         <span id="chip-fhir" class="chip hidden"></span>
         <span class="chip hidden sm:inline">MCP: {{ servers|join(' + ') }}</span>
@@ -39,10 +42,9 @@
   <!-- Model-not-ready banner -->
   <div id="model-banner" class="hidden bg-amber-50 border-b border-amber-200">
     <div class="max-w-[1400px] mx-auto px-5 py-2.5 flex items-center justify-between gap-3 text-[13px]">
-      <span class="text-amber-800">Open-weights model not connected yet — Ollama may still be starting. The agent runs deterministically meanwhile and switches to the model <b>automatically</b> once it's ready. If it isn't downloaded, get it below.</span>
+      <span class="text-amber-800">Open-weights model not connected yet — the runtime may still be starting. The agent runs deterministically meanwhile and switches to the model <b>automatically</b> once it's ready. Pick a model from the <b>model:</b> menu above (choose a smaller one if your machine is low-powered), or download below.</span>
       <div class="flex gap-2 shrink-0">
         <button id="btn-pull" class="btn-sm bg-ink text-white">Download model</button>
-        <button id="btn-repair" class="btn-sm border border-amber-300 text-amber-800">Clear &amp; re-download</button>
       </div>
     </div>
     <div id="pull-progress" class="hidden max-w-[1400px] mx-auto px-5 pb-2 text-[12px] text-subtle font-mono"></div>
