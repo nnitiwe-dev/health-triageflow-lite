@@ -42,7 +42,8 @@ class LLMBackend(Protocol):
     def chat_base_url(self) -> str: ...
     def runtime_installed(self) -> bool: ...
     def server_up(self) -> bool: ...
-    def ensure_server(self, wait_s: float = 0.0) -> bool: ...
+    def ensure_server(self, wait_s: float = 0.0,
+                      on_progress: Callable[[str], None] | None = None) -> bool: ...
     def installed_models(self) -> list[str]: ...
     def catalog(self) -> list[ModelOption]: ...
     def is_installed(self, model_id: str) -> bool: ...
@@ -64,10 +65,21 @@ def make_chat_model(base_url: str, model: str, *, temperature: float = 0.0,
 
 
 def get_backend(backend: str | None = None) -> LLMBackend:
+    """Resolve the backend. ``auto`` = use whatever is already installed (Ollama preferred for
+    its zero-friction model pulls), else fall back to llama.cpp (which can self-provision)."""
     from ..core.config import settings
-    name = (backend or settings.llm_backend or "ollama").lower()
-    if name == "llamacpp":
-        from .llamacpp_backend import LlamaCppBackend
-        return LlamaCppBackend()
+    from .llamacpp_backend import LlamaCppBackend
     from .ollama_backend import OllamaBackend
-    return OllamaBackend()
+
+    name = (backend or settings.llm_backend or "auto").lower()
+    if name == "ollama":
+        return OllamaBackend()
+    if name == "llamacpp":
+        return LlamaCppBackend()
+    # auto: prefer an already-installed runtime; else llama.cpp (self-provisions on Windows,
+    # guides the user on macOS/Linux).
+    ollama = OllamaBackend()
+    if ollama.runtime_installed():
+        return ollama
+    # neither installed → llama.cpp (it can self-provision; Ollama's installer needs admin/GUI)
+    return LlamaCppBackend()

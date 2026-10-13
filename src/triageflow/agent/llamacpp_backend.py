@@ -15,9 +15,12 @@ detect it and give a clear hint if it's missing — the app still runs determini
 
 from __future__ import annotations
 
+import os
+import platform
 import shutil
 import subprocess
 import time
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +28,7 @@ from pathlib import Path
 import httpx
 
 from ..core.config import settings
+from .downloads import download_with_resume
 from .llm_backend import BackendStatus, ModelOption
 
 
@@ -68,9 +72,77 @@ class LlamaCppBackend:
         g = _BY_ID.get(model_id)
         return settings.models_dir / (g.filename if g else f"{model_id}.gguf")
 
-    # --- runtime / server -----------------------------------------------------
+    # --- runtime binary (detect / self-provision) -----------------------------
+    def _provisioned_bin(self) -> Path:
+        exe = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
+        return settings.home / "bin" / "llamacpp" / exe
+
+    def _bin(self) -> str | None:
+        """Resolved llama-server: one on PATH, else one we provisioned under ~/.triageflow."""
+        found = shutil.which(settings.llamacpp_bin)
+        if found:
+            return found
+        p = self._provisioned_bin()
+        return str(p) if p.is_file() else None
+
     def runtime_installed(self) -> bool:
-        return shutil.which(settings.llamacpp_bin) is not None
+        return self._bin() is not None
+
+    def can_provision(self) -> bool:
+        # llama.cpp publishes prebuilt binaries only for Windows; elsewhere we guide the user.
+        return platform.system() == "Windows"
+
+    def ensure_runtime(self, on_progress: Callable[[str], None] | None = None) -> bool:
+        """Make a llama-server binary available. If none is installed, download the prebuilt
+        Windows release (resumable). On macOS/Linux there is no official prebuilt binary, so we
+        return False and the caller surfaces the one-line install hint."""
+        if self.runtime_installed():
+            return True
+        if not self.can_provision():
+            return False
+        try:
+            arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+            rel = httpx.get("https://api.github.com/repos/ggml-org/llama.cpp/releases",
+                            params={"per_page": "10"}, timeout=20, trust_env=False).json()
+            asset = None
+            for r in rel:
+                for a in r.get("assets", []):
+                    n = a["name"]
+                    if n.endswith(".zip") and "bin-win-cpu" in n and arch in n:
+                        asset = a
+                        break
+                if asset:
+                    break
+            if not asset:
+                return False
+            zip_path = settings.home / "bin" / asset["name"]
+            if on_progress:
+                on_progress(f"downloading llama.cpp runtime ({asset['size'] >> 20} MB)…")
+            if not download_with_resume(asset["browser_download_url"], zip_path,
+                                        label="llama.cpp runtime", on_progress=on_progress):
+                return False
+            dest = self._provisioned_bin().parent
+            dest.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(zip_path) as z:
+                z.extractall(dest)
+            # flatten: binaries may be nested in a subfolder
+            for p in dest.rglob("llama-server*"):
+                if p.name in ("llama-server", "llama-server.exe"):
+                    target = self._provisioned_bin()
+                    if p != target:
+                        for f in p.parent.iterdir():  # keep DLLs beside the exe
+                            try:
+                                shutil.copy2(f, dest / f.name)
+                            except (shutil.SameFileError, OSError):
+                                pass
+                    os.chmod(target, 0o755)
+                    break
+            zip_path.unlink(missing_ok=True)
+            return self.runtime_installed()
+        except Exception as e:
+            if on_progress:
+                on_progress(f"runtime provisioning failed: {type(e).__name__}: {e}")
+            return False
 
     def server_up(self) -> bool:
         try:
@@ -97,24 +169,26 @@ class LlamaCppBackend:
         inst = self.installed_models()
         return inst[0] if inst else None
 
-    def ensure_server(self, wait_s: float = 0.0) -> bool:
+    def ensure_server(self, wait_s: float = 0.0,
+                      on_progress: Callable[[str], None] | None = None) -> bool:
         if self.server_up():
             if self._active is None:
                 self._active = settings.llamacpp_default_model
             return True
-        if not self.runtime_installed():
+        if not self.runtime_installed() and not self.ensure_runtime(on_progress):
             return False
         model_id = self._pick_model()
         if not model_id:
-            return False  # nothing to serve yet — needs a download
+            return False  # runtime ready, but no model downloaded yet (user picks one)
         return self._start_server_for(model_id, wait_s=max(wait_s, 60.0))
 
     def _start_server_for(self, model_id: str, wait_s: float = 60.0) -> bool:
         self._stop()
         gguf = self.gguf_path(model_id)
-        if not gguf.is_file() or not self.runtime_installed():
+        binary = self._bin()
+        if not gguf.is_file() or not binary:
             return False
-        cmd = [settings.llamacpp_bin, "-m", str(gguf),
+        cmd = [binary, "-m", str(gguf),
                "--host", settings.llamacpp_host, "--port", str(settings.llamacpp_port),
                "-c", str(settings.llamacpp_ctx), "-ngl", str(settings.llamacpp_ngl), "--jinja"]
         self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -147,32 +221,10 @@ class LlamaCppBackend:
             return False
         if self.is_installed(model_id):
             return True
-        dest = self.gguf_path(model_id)
-        tmp = dest.with_suffix(dest.suffix + ".part")
         url = f"https://huggingface.co/{g.repo}/resolve/main/{g.filename}?download=true"
-        try:
-            with httpx.stream("GET", url, follow_redirects=True, timeout=None) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length", 0))
-                done = 0
-                last = 0
-                with open(tmp, "wb") as f:
-                    for chunk in r.iter_bytes(chunk_size=1 << 20):
-                        f.write(chunk)
-                        done += len(chunk)
-                        if on_progress and total and done - last > (20 << 20):  # every ~20MB
-                            last = done
-                            on_progress(f"downloading {g.label} — {100 * done / total:.0f}% "
-                                        f"({done >> 20}/{total >> 20} MB)")
-            tmp.rename(dest)
-            if on_progress:
-                on_progress(f"downloaded {g.label}")
-            return True
-        except Exception as e:  # cleanup partials so a retry is clean
-            tmp.unlink(missing_ok=True)
-            if on_progress:
-                on_progress(f"download failed: {type(e).__name__}: {e}")
-            return False
+        # Resumable + retrying — survives network interruptions (a .part file is resumed).
+        return download_with_resume(url, self.gguf_path(model_id), label=g.label,
+                                    on_progress=on_progress)
 
     def set_active_model(self, model_id: str) -> None:
         # Switching model = restart llama-server with the new GGUF (one model per process).
@@ -192,10 +244,16 @@ class LlamaCppBackend:
         up = self.server_up()
         model, fb = self.resolve_model()
         if not installed:
-            msg = "llama-server not found — the agent runs deterministically."
-            hint = "Install with `brew install llama.cpp` (or build llama.cpp), then restart."
+            msg = "llama.cpp runtime not found — the agent runs deterministically meanwhile."
+            sysname = platform.system()
+            if sysname == "Windows":
+                hint = "The llama.cpp runtime will be downloaded automatically — pick a model below."
+            elif sysname == "Darwin":
+                hint = "Install once with `brew install llama.cpp`, then restart (or use Ollama)."
+            else:
+                hint = "Install llama.cpp (`llama-server` on PATH) or use Ollama, then restart."
         elif not up:
-            msg = "llama-server not running yet — pick a model to download/start below."
+            msg = "llama.cpp runtime ready — pick a model to download/start below."
             hint = ""
         else:
             msg = "Ready"

@@ -36,9 +36,10 @@ def _normalize_ollama_host(raw: str) -> str:
 
 @dataclass
 class Settings:
-    # Which local open-weights runtime to use: "ollama" (default, zero-friction) or
-    # "llamacpp" (llama.cpp's llama-server, OpenAI-compatible). Both keep data on the machine.
-    llm_backend: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLM_BACKEND", "ollama").lower())
+    # Which local open-weights runtime to use. "auto" (default) detects what's already on the
+    # machine (Ollama or llama.cpp) and uses it — no redundant setup; only if neither is present
+    # does it set one up. Force one with "ollama" or "llamacpp". All keep data on the machine.
+    llm_backend: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLM_BACKEND", "auto").lower())
 
     # Open-weights model served locally (data never leaves the machine).
     model: str = field(default_factory=lambda: _env("TRIAGEFLOW_MODEL", "qwen2.5:7b-instruct"))

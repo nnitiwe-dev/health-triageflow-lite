@@ -64,3 +64,38 @@ def test_both_backends_offer_tiers(tier_present, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "models_dir", tmp_path)
     for b in (OllamaBackend(), LlamaCppBackend()):
         assert any(o.tier == tier_present for o in b.catalog())
+
+
+def test_auto_prefers_installed_ollama(monkeypatch):
+    monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: True)
+    assert isinstance(get_backend("auto"), OllamaBackend)
+
+
+def test_auto_falls_back_to_llamacpp_when_no_ollama(monkeypatch):
+    monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: False)
+    monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: True)
+    assert isinstance(get_backend("auto"), LlamaCppBackend)
+
+
+def test_auto_uses_llamacpp_when_neither_installed(monkeypatch):
+    monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: False)
+    monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: False)
+    assert isinstance(get_backend("auto"), LlamaCppBackend)  # it can self-provision
+
+
+def test_llamacpp_provisioned_bin_under_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "home", tmp_path)
+    monkeypatch.setattr(settings, "models_dir", tmp_path / "models")
+    b = LlamaCppBackend()
+    assert b._provisioned_bin().name.startswith("llama-server")
+    assert tmp_path in b._provisioned_bin().parents
+
+
+@pytest.mark.parametrize("osname,needle", [
+    ("Windows", "automatically"), ("Darwin", "brew install"), ("Linux", "PATH")])
+def test_llamacpp_status_hint_per_os(osname, needle, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "models_dir", tmp_path)
+    monkeypatch.setattr("platform.system", lambda: osname)
+    monkeypatch.setattr("shutil.which", lambda _b: None)
+    st = LlamaCppBackend().status()
+    assert needle.lower() in st.hint.lower()

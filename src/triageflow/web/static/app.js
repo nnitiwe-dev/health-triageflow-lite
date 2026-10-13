@@ -265,6 +265,9 @@ async function refreshStatus() {
   // Auto-hide the banner the moment a model is ready; poll until then so a late/cold-starting
   // runtime clears it on its own (no manual reload, no falsely-stuck banner).
   $("model-banner").classList.toggle("hidden", ready);
+  if (!ready && s.backend_hint) {
+    $("banner-msg").innerHTML = `<b>${s.backend}</b> backend — ${s.backend_hint} The agent runs deterministically meanwhile; pick a model from the <b>model:</b> menu (a smaller one on a low-powered box).`;
+  }
   if (!ready && !_statusTimer) _statusTimer = setInterval(refreshStatus, 3000);
   if (ready && _statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
   if (s.fhir && s.fhir.enabled) {

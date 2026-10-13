@@ -142,19 +142,24 @@ async def model_select(request: Request):
     backend = _state["backend"]
     if not model_id:
         return JSONResponse({"error": "model is required"}, status_code=400)
-    if not await asyncio.to_thread(backend.runtime_installed):
-        return JSONResponse({"error": (await asyncio.to_thread(backend.status)).hint
-                             or "runtime not installed"}, status_code=400)
+    # Runtime readiness (incl. self-provisioning) is handled in the worker so its progress
+    # streams to the UI and the user sees a clear install hint if it can't be set up.
 
     q: queue.Queue[str | None] = queue.Queue()
 
     def worker():
         try:
-            backend.ensure_server(wait_s=0)
+            # ensure_server also self-provisions the runtime where possible (e.g. llama.cpp on
+            # Windows), streaming progress; if it still isn't available, surface the install hint.
+            backend.ensure_server(wait_s=0, on_progress=lambda s: q.put(s))
+            if not backend.runtime_installed():
+                q.put("__ERR__" + (backend.status().hint or "runtime not installed"))
+                q.put(None)
+                return
             if not backend.is_installed(model_id):
                 q.put(f"preparing {model_id}…")
                 if not backend.pull_model(model_id, on_progress=lambda s: q.put(s)):
-                    q.put("__ERR__download failed")
+                    q.put("__ERR__download failed — check your connection and try again")
                     q.put(None)
                     return
             q.put("activating model…")

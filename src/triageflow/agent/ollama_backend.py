@@ -35,7 +35,8 @@ class OllamaBackend:
     def server_up(self) -> bool:
         return om.server_up()
 
-    def ensure_server(self, wait_s: float = 0.0) -> bool:
+    def ensure_server(self, wait_s: float = 0.0,
+                      on_progress: Callable[[str], None] | None = None) -> bool:
         return True if om.server_up() else om.start_server(wait_s=wait_s)
 
     def installed_models(self) -> list[str]:
