@@ -16,8 +16,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_DIR = Path.home() / ".triageflow"
 _lock = threading.Lock()
+
+
+def _default_dir() -> Path:
+    # Same directory as everything else the app stores (honours TRIAGEFLOW_HOME).
+    from .config import settings
+    return settings.home
 
 
 def _now() -> str:
@@ -26,7 +31,7 @@ def _now() -> str:
 
 class AuditLog:
     def __init__(self, base_dir: Path | None = None):
-        self.base_dir = Path(base_dir) if base_dir else _DEFAULT_DIR
+        self.base_dir = Path(base_dir) if base_dir else _default_dir()
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.jsonl_path = self.base_dir / "audit.jsonl"
         self.db_path = self.base_dir / "triageflow.db"
@@ -60,7 +65,7 @@ class AuditLog:
             "payload": payload or {},
         }
         with _lock:
-            with open(self.jsonl_path, "a") as f:
+            with open(self.jsonl_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
             with sqlite3.connect(self.db_path) as con:
                 con.execute(

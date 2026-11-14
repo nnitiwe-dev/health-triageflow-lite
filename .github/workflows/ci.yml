@@ -7,11 +7,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} · py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # The desk PC may be Windows, macOS or Linux — every push is tested on all three.
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12"]
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -27,8 +32,38 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check src tests evals
 
-      - name: Unit tests (pins the SATS/TEWS table)
+      - name: Unit + flow tests (SATS table, approval gate, llama.cpp provisioning)
         run: uv run python -m pytest -q
 
-      - name: Evaluation suite (scenarios + determinism)
+      - name: Evaluation suite (scoring, flow, synthetic set, sign-finding)
         run: uv run python evals/run.py
+
+  # Real proof that the model runtime works on each OS: download the official llama.cpp
+  # binary through the app's own provisioning code and run it.
+  runtime:
+    name: llama.cpp runtime · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      PYTHONUTF8: "1"
+      TRIAGEFLOW_LLM_BACKEND: llamacpp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Provision and execute llama-server
+        shell: bash
+        run: |
+          export TRIAGEFLOW_HOME="$RUNNER_TEMP/triageflow"
+          uv run python - <<'PY'
+          import sys
+          from triageflow.agent.llamacpp_backend import LlamaCppBackend
+          b = LlamaCppBackend()
+          ok = b.ensure_runtime(on_progress=print)
+          print("binary:", b._bin(), "| error:", b.last_error or "none")
+          sys.exit(0 if ok and b.runtime_installed() else 1)
+          PY

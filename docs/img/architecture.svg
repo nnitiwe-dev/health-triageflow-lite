@@ -46,7 +46,7 @@
     <rect x="420" y="140" width="1000" height="96" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
     <text x="440" y="172" font-size="18" class="t">Nurse Workspace (Web UI)</text>
     <text x="440" y="196" font-size="13" class="s">FastAPI · Jinja2 · Tailwind · vanilla JS — structured intake, live tool-call trace (SSE), approval control</text>
-    <text x="440" y="216" font-size="13" class="s">Panels: 1 Intake  ·  2 Agent activity (streamed)  ·  3 Proposed priority + clinician gate  ·  waiting queue (acuity-sorted)</text>
+    <text x="440" y="216" font-size="13" class="s">Panels: 1 Intake (emergency signs first)  ·  2 Signs to confirm + live tool calls  ·  3 Priority, reasons, actions + clinician gate  ·  waiting queue</text>
   </g>
   <line x1="360" y1="188" x2="416" y2="188" stroke="#0a0a0a" stroke-width="2" marker-end="url(#arrowB)" marker-start="url(#arrowB)"/>
 
@@ -54,16 +54,16 @@
   <g>
     <rect x="420" y="268" width="1000" height="214" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
     <text x="440" y="298" font-size="18" class="t">Agent — LangGraph StateGraph  <tspan class="s" font-size="13" font-weight="400">(open-source orchestration · checkpointer = MemorySaver)</tspan></text>
-    <text x="440" y="320" font-size="12.5" class="s">A predictable workflow with tool-calling nodes (not a free-running loop). Validates its own data, checks its citations, recovers via deterministic fallback.</text>
+    <text x="440" y="320" font-size="12.5" class="s">A predictable workflow with tool-calling nodes (not a free-running loop). Scores first, then suggests signs; checks its evidence against the protocol; falls back deterministically.</text>
 
     <!-- node pipeline -->
     <g font-size="12.5" font-weight="700">
       <rect x="440" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="500" y="362" text-anchor="middle" class="t">validate</text><text x="500" y="378" text-anchor="middle" class="tiny" font-weight="400">data quality</text>
-      <rect x="576" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="636" y="362" text-anchor="middle" class="t">extract</text><text x="636" y="378" text-anchor="middle" class="tiny" font-weight="400">signs (LLM)</text>
-      <rect x="712" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="772" y="362" text-anchor="middle" class="t">retrieve</text><text x="772" y="378" text-anchor="middle" class="tiny" font-weight="400">evidence</text>
-      <rect x="848" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="908" y="362" text-anchor="middle" class="t">score</text><text x="908" y="378" text-anchor="middle" class="tiny" font-weight="400">deterministic</text>
-      <rect x="984" y="340" width="130" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="1049" y="362" text-anchor="middle" class="t">deterioration</text><text x="1049" y="378" text-anchor="middle" class="tiny" font-weight="400">re-check flag</text>
-      <rect x="1130" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="1190" y="362" text-anchor="middle" class="t">self-check</text><text x="1190" y="378" text-anchor="middle" class="tiny" font-weight="400">grounding</text>
+      <rect x="576" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="636" y="362" text-anchor="middle" class="t">retrieve</text><text x="636" y="378" text-anchor="middle" class="tiny" font-weight="400">protocol text</text>
+      <rect x="712" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="772" y="362" text-anchor="middle" class="t">score</text><text x="772" y="378" text-anchor="middle" class="tiny" font-weight="400">deterministic</text>
+      <rect x="848" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="908" y="362" text-anchor="middle" class="t">deterioration</text><text x="908" y="378" text-anchor="middle" class="tiny" font-weight="400">re-check flag</text>
+      <rect x="984" y="340" width="130" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="1049" y="362" text-anchor="middle" class="t">self-check</text><text x="1049" y="378" text-anchor="middle" class="tiny" font-weight="400">vs protocol text</text>
+      <rect x="1130" y="340" width="120" height="48" rx="8" fill="#fff" stroke="#93c5fd"/><text x="1190" y="362" text-anchor="middle" class="t">extract</text><text x="1190" y="378" text-anchor="middle" class="tiny" font-weight="400">signs (LLM)</text>
       <rect x="1266" y="340" width="134" height="48" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/><text x="1333" y="360" text-anchor="middle" fill="#dc2626">⏸ approval</text><text x="1333" y="378" text-anchor="middle" fill="#dc2626" font-weight="400">interrupt()</text>
       <g stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)">
         <line x1="560" y1="364" x2="574" y2="364"/><line x1="696" y1="364" x2="710" y2="364"/><line x1="832" y1="364" x2="846" y2="364"/>
@@ -76,16 +76,16 @@
 
     <!-- Model -->
     <rect x="1180" y="498" width="240" height="118" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
-    <text x="1200" y="528" font-size="16" class="t">Qwen2.5-7B-Instruct</text>
-    <text x="1200" y="550" font-size="12.5" class="s">via local Ollama (open-weights)</text>
-    <text x="1200" y="570" font-size="12.5" class="s">fallback Llama-3.2-3B</text>
-    <text x="1200" y="594" font-size="12" class="tiny">Used only by extract + self-check</text>
-    <text x="1200" y="610" font-size="12" class="tiny">narration — never scores.</text>
+    <text x="1200" y="528" font-size="16" class="t">Qwen2.5 7B / 3B / 0.5B</text>
+    <text x="1200" y="550" font-size="12.5" class="s">local llama.cpp (self-provisioned)</text>
+    <text x="1200" y="570" font-size="12.5" class="s">or Ollama if already installed</text>
+    <text x="1200" y="594" font-size="12" class="tiny">Only suggests signs for the nurse</text>
+    <text x="1200" y="610" font-size="12" class="tiny">to review — never scores.</text>
   </g>
   <!-- UI <-> agent -->
   <line x1="920" y1="236" x2="920" y2="266" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
   <!-- agent <-> model -->
-  <path d="M1333 390 L1333 470 L1300 470 L1300 498" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <path d="M1190 390 L1190 470 L1300 470 L1300 498" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
 
   <!-- ROW 3: MCP client + servers -->
   <rect x="60" y="520" width="300" height="86" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
@@ -97,8 +97,8 @@
   <rect x="420" y="648" width="640" height="200" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
   <text x="440" y="678" font-size="17" class="t">Own MCP server — "triageflow"  <tspan class="s" font-size="12" font-weight="400">(stdio · the agent's hands)</tspan></text>
   <g font-size="12.5">
-    <rect x="440" y="692" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="710" class="t">validate_triage_input</text><text x="452" y="726" class="tiny">missing / implausible / stale / unit</text>
-    <rect x="746" y="692" width="300" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="758" y="710" class="t">score_triage ★</text><text x="758" y="726" class="tiny">deterministic SATS priority + evidence</text>
+    <rect x="440" y="692" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="710" class="t">validate_triage_input</text><text x="452" y="726" class="tiny">missing / impossible / extreme / stale</text>
+    <rect x="746" y="692" width="300" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="758" y="710" class="t">score_triage ★</text><text x="758" y="726" class="tiny">deterministic priority + evidence + actions</text>
     <rect x="440" y="740" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="758" class="t">check_deterioration ★</text><text x="452" y="774" class="tiny">re-check vs baseline → 2nd-look flag</text>
     <rect x="746" y="740" width="300" height="40" rx="7" fill="#fef2f2" stroke="#dc2626"/><text x="758" y="758" fill="#dc2626" font-weight="700">request_clinician_approval ★</text><text x="758" y="774" class="tiny">the irreversible-action gate</text>
     <rect x="440" y="788" width="290" height="40" rx="7" fill="#fff" stroke="#93c5fd"/><text x="452" y="806" class="t">suggest_discriminators</text><text x="452" y="822" class="tiny">free text → candidate signs</text>
@@ -140,7 +140,7 @@
   <text x="1078" y="968" font-size="11.5" class="tiny">no real patient data · synthetic by default</text>
 
   <!-- score -> engine -->
-  <path d="M900 732 L900 760 L620 760 L620 878" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <path d="M746 712 L738 712 L738 862 L700 862 L700 878" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
   <!-- server -> audit -->
   <path d="M900 848 L900 878" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#arrow)"/>
   <!-- filesystem -> data sources -->
@@ -158,6 +158,6 @@
   <path d="M1046 808 L1300 808 L1300 760 L1479 760" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
 
   <!-- Human gate loop: approval node waits on nurse -->
-  <path d="M1333 318 L1333 150 L362 150" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowB)"/>
-  <text x="980" y="142" font-size="12.5" fill="#dc2626" font-weight="700">approval gate pauses → named clinician approves/overrides in the UI → finalize + audit</text>
+  <path d="M1333 318 L1333 148 L362 148" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowB)"/>
+  <text x="800" y="131" font-size="12.5" fill="#dc2626" font-weight="700">approval gate pauses → named clinician approves / overrides (rules enforced server-side) → finalize + audit</text>
 </svg>

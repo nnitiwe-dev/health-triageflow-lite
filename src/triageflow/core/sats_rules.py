@@ -23,6 +23,31 @@ SOURCE_CHART = "SATS Training Manual 2012, Adult SATS Chart (Figure 4, p. 8-9)"
 SOURCE_TEWS = "SATS Training Manual 2012, Adult SATS Chart 'ADULT TEWS' table (Figure 4, p. 9)"
 SOURCE_FLOW = "SATS Training Manual 2012, Adult SATS process flowchart (Figure 2/4)"
 SOURCE_LEVELS = "SATS Training Manual 2012, SATS priority levels and target times (Table 3)"
+SOURCE_INVESTIGATIONS = ("SATS Training Manual 2012, Adult SATS Chart 'Check for additional "
+                         "investigations' (Figure 4) and Section 6")
+SOURCE_LOC = ("SATS Training Manual 2012, Section 3.2 'Level of consciousness reduced / confused: "
+              "any patient that is not fully alert' (Adult SATS Chart, very urgent)")
+SOURCE_HYPO = ("SATS Training Manual 2012, Adult SATS Chart: emergency sign 'Hypoglycaemia' + "
+               "additional investigations 'glucotest 3 mmol/L or less - move to resus'")
+SOURCE_PAIN = ("SATS Training Manual 2012, Adult SATS Chart (pain discriminator); the manual "
+               "defines severe pain as unbearable and moderate as intense but bearable. The 0-10 "
+               "cut-offs are a TriageFlow convention - the nurse confirms the pain category")
+SOURCE_SCOPE = ("SATS Training Manual 2012, Section 2.2: the adult chart is for patients older "
+                "than 12 years or taller than 150 cm")
+# Honest labelling: these are NOT in the SATS adult chart. They are local, conservative
+# safety conventions and are shown to the nurse as such (never passed off as SATS).
+SOURCE_LOCAL_SPO2 = ("TriageFlow safety rule - NOT a SATS adult discriminator. The SATS adult "
+                     "chart says: check SpO2 and hand over to the senior clinician for oxygen")
+SOURCE_LOCAL_WATCH = ("TriageFlow deterioration-watch convention (a re-check that scores worse "
+                      "than baseline) - NOT a SATS rule; it only asks a clinician to re-look")
+
+# Thresholds for the rules above (single source of truth, pinned by tests).
+ADULT_MIN_AGE_YEARS = 12          # younger than this => paediatric chart (out of scope)
+HYPOGLYCAEMIA_MAX_MMOL = 3.0      # glucose at or below this => emergency (RED)
+HYPERGLYCAEMIA_MIN_MMOL = 11.0    # glucose at or above this => ketone dipstick prompt
+SPO2_SAFETY_FLOOR = 92            # below this => local safety escalation to ORANGE
+PAIN_SEVERE_MIN = 7               # 7-10 => severe pain (very urgent)
+PAIN_MODERATE_MIN = 4             # 4-6  => moderate pain (urgent)
 
 
 class Priority(str, Enum):
@@ -42,6 +67,15 @@ ACUITY: dict[Priority, int] = {
     Priority.YELLOW: 1,
     Priority.ORANGE: 2,
     Priority.RED: 3,
+}
+
+# Plain-language acuity names (SATS Table 3) - used wherever a result is shown to a person.
+ACUITY_NAME: dict[Priority, str] = {
+    Priority.RED: "Emergency",
+    Priority.ORANGE: "Very urgent",
+    Priority.YELLOW: "Urgent",
+    Priority.GREEN: "Routine",
+    Priority.BLUE: "Deceased",
 }
 
 TARGET_TIME: dict[Priority, str] = {
@@ -171,7 +205,8 @@ EMERGENCY_SIGNS: list[Discriminator] = [
     Discriminator("airway_obstructed", "Obstructed airway / not breathing", Priority.RED),
     Discriminator("seizure_active", "Current (active) seizure", Priority.RED),
     Discriminator("burn_face_inhalation", "Facial or inhalation burn", Priority.RED),
-    Discriminator("hypoglycaemia_lt3", "Hypoglycaemia (glucose < 3 mmol/L)", Priority.RED),
+    Discriminator("hypoglycaemia_lt3", "Hypoglycaemia (glucose 3 mmol/L or less)", Priority.RED,
+                  SOURCE_HYPO),
     Discriminator("cardiac_arrest", "Cardiac arrest", Priority.RED),
 ]
 

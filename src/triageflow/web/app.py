@@ -8,6 +8,7 @@ approval control on the right. Nothing reaches a queue position without a named 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import queue
@@ -23,11 +24,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..agent import fhir_emr
-from ..agent.graph import TriageAgent
+from ..agent.graph import ApprovalError, TriageAgent
 from ..agent.llm_backend import get_backend
-from ..agent.mcp_client import TriageMCP
+from ..agent.mcp_client import InProcessMCP, TriageMCP
+from ..core import sats_rules as R
 from ..core.audit import get_audit
 from ..core.config import settings
+from ..core.explain import TARGET_TEXT
 from ..core.scoring import score_encounter
 from ..data import synthetic
 
@@ -38,45 +41,87 @@ audit = get_audit()
 # fresh app.js / styles.css (no stale-cached-JS surprises).
 _ASSET_V = str(int(time.time()))
 
-app = FastAPI(title="TriageFlow Lite")
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    await _startup()
+    try:
+        yield
+    finally:
+        for task in list(_tasks):
+            task.cancel()
+        stop = getattr(_state.get("backend"), "_stop", None)
+        if stop:                      # don't leave llama-server holding RAM after exit
+            await asyncio.to_thread(stop)
+
+
+app = FastAPI(title="TriageFlow Lite", lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
-_state: dict[str, Any] = {"agent": None, "mcp": None, "model": None,
-                          "using_fallback": False, "servers": []}
+_state: dict[str, Any] = {"agent": None, "mcp": None, "model": None, "backend": None,
+                          "using_fallback": False, "servers": [], "confirmed": [],
+                          "llm_enabled": False}
+_tasks: set[asyncio.Task] = set()   # keep references so background tasks aren't collected
 
 
 def _sse(obj: dict[str, Any]) -> str:
     return f"data: {json.dumps(obj, default=str)}\n\n"
 
 
-@app.on_event("startup")
+def _background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
 async def _startup() -> None:
-    backend = get_backend()
-    _state["backend"] = backend
-    # Fire the runtime launch but DON'T block startup — a cold server can take 30-60s to be
-    # ready, and the web server must come up immediately. The model resolves as soon as the
-    # server is warm (via the status poll), clearing the banner on its own.
-    if not await asyncio.to_thread(backend.server_up):
-        await asyncio.to_thread(lambda: backend.ensure_server(wait_s=0))
-    model, using_fallback = await asyncio.to_thread(backend.resolve_model)
-    _state["model"] = model
-    _state["using_fallback"] = using_fallback
-    mcp = TriageMCP(include_filesystem=True)
+    """Come up FAST and never wait on the network. Only our own (local) MCP server is
+    awaited; the borrowed filesystem MCP (npx download) and the model runtime (binary
+    provisioning, model load) attach in the background and switch on when they are ready."""
+    _state["backend"] = get_backend()
+    mcp: Any = TriageMCP(include_filesystem=True)
     try:
-        await mcp.connect()
-        _state["servers"] = mcp.connected_servers
+        await mcp.connect(wait_for_filesystem=False)
     except Exception:
-        _state["servers"] = []
+        # Our own server could not be spawned (very unusual). Keep the desk working with the
+        # same tool functions in-process rather than refusing to start.
+        mcp = InProcessMCP()
     _state["mcp"] = mcp
-    _rebuild_agent(model)
+    _state["servers"] = list(mcp.connected_servers)
+    _rebuild_agent(None)
+    if isinstance(mcp, TriageMCP):
+        _background(_attach_filesystem(mcp))
+    _background(_bring_up_model())
+
+
+async def _attach_filesystem(mcp: TriageMCP) -> None:
+    await mcp.connect_filesystem()
+    _state["servers"] = list(mcp.connected_servers)
+
+
+async def _bring_up_model() -> None:
+    """Start the local runtime (self-provisioning the llama.cpp binary if needed), pick up a
+    ready model, and load it into memory before the first patient."""
+    backend = _state["backend"]
+    try:
+        await asyncio.to_thread(lambda: backend.ensure_server(wait_s=0))
+        await asyncio.to_thread(_maybe_refresh_model)
+    except Exception:
+        return
+    if _state.get("llm_enabled"):
+        _state["warming"] = True
+        try:
+            await _agent().warm_up()
+        finally:
+            _state["warming"] = False
 
 
 def _rebuild_agent(model: str | None) -> None:
     # TRIAGEFLOW_NO_LLM=1 runs the agent deterministically (fast demos/evals, or LLM-off sites).
     agent_model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else model
-    _state["llm_enabled"] = agent_model is not None
     base = _state["backend"].chat_base_url() if _state.get("backend") else None
-    _state["agent"] = TriageAgent(_state["mcp"], model=agent_model, chat_base_url=base)
+    _state["agent"] = TriageAgent(_state["mcp"], model=agent_model, chat_base_url=base,
+                                  extract_timeout=settings.extract_timeout_s)
+    _state["llm_enabled"] = _state["agent"].llm_enabled
 
 
 def _agent() -> TriageAgent:
@@ -116,6 +161,10 @@ async def status():
         "model": _state["model"], "using_fallback": _state["using_fallback"],
         "servers": _state["servers"], "data_region": settings.data_region,
         "model_ready": _state["model"] is not None,
+        "llm_enabled": bool(_state.get("llm_enabled")),
+        "warming": bool(_state.get("warming")),
+        "handover_note": settings.handover_note,
+        "llm_off_by_config": bool(os.environ.get("TRIAGEFLOW_NO_LLM")),
         "backend": backend.name if backend else None,
         "runtime_installed": bs.runtime_installed if bs else False,
         "backend_hint": bs.hint if bs else "",
@@ -162,8 +211,11 @@ async def model_select(request: Request):
                     q.put("__ERR__download failed — check your connection and try again")
                     q.put(None)
                     return
-            q.put("activating model…")
-            backend.set_active_model(model_id)
+            q.put("starting model — loading it into memory can take a minute…")
+            if backend.set_active_model(model_id) is False:
+                q.put("__ERR__" + (getattr(backend, "last_error", "") or "model failed to start"))
+                q.put(None)
+                return
             q.put("__DONE__" + json.dumps({"model": backend.active_model()}))
         except Exception as e:
             q.put(f"__ERR__{type(e).__name__}: {e}")
@@ -233,46 +285,61 @@ async def fhir_import(request: Request):
     }
 
 
+_ORDER = {"RED": 0, "ORANGE": 1, "YELLOW": 2, "GREEN": 3, "BLUE": 4, None: 5}
+
+
 @app.get("/api/queue")
 async def queue_demo(n: int = 6, seed: int = 42):
-    """A reproducible synthetic queue with instant deterministic bands (no LLM)."""
+    """The waiting queue: every patient confirmed at this desk in this session, plus a
+    reproducible synthetic backdrop (clearly marked ``demo``) so the strip is never empty."""
     out = []
+    for item in _state["confirmed"]:
+        out.append({**item, "demo": False})
     for enc in synthetic.stream(n=n, seed=seed):
         r = score_encounter(enc)
         out.append({
+            "demo": True,
             "encounter": enc.model_dump(mode="json"),
-            "proposed_priority": r.proposed_priority.value if r.proposed_priority else None,
+            "priority": r.proposed_priority.value if r.proposed_priority else None,
             "tews_total": r.tews_total,
             "complaint": enc.presenting_complaint,
+            "arrival": enc.arrival_time.isoformat(),
         })
     # Order by acuity (then arrival) so the most urgent surfaces — the point of the desk.
-    order = {"RED": 0, "ORANGE": 1, "YELLOW": 2, "GREEN": 3, None: 4}
-    out.sort(key=lambda x: (order.get(x["proposed_priority"], 4),
-                            x["encounter"].get("arrival_time", "")))
-    # Annotate explicit queue position so the UI shows who is seen first → last.
+    out.sort(key=lambda x: (_ORDER.get(x["priority"], 5), x.get("arrival", "")))
     total = len(out)
     for i, item in enumerate(out):
         item["position"] = i + 1
         item["total"] = total
         item["is_next"] = (i == 0)
+        p = item["priority"]
+        item["acuity"] = R.ACUITY_NAME[R.Priority(p)] if p else ""
+        item["target"] = TARGET_TEXT.get(p, "")
     return out
 
 
 @app.get("/api/synthetic")
 async def synthetic_one():
-    """One synthetic patient of a RANDOM acuity (so 'Load synthetic' isn't always green)."""
+    """One synthetic patient of a RANDOM acuity (so 'Load synthetic' isn't always green).
+    Signs are NOT pre-applied: the nurse confirms them, exactly as with a real patient."""
     import random as _r
     # Weighted toward a realistic OPD spread (more routine than critical), but varied.
     profile = _r.choices(["stable", "moderate", "severe", "critical"],
                          weights=[4, 3, 2, 1], k=1)[0]
     enc = synthetic.make_encounter(profile, seed=_r.randint(0, 999999))
-    r = score_encounter(enc)
-    return {
-        "encounter": enc.model_dump(mode="json"),
-        "proposed_priority": r.proposed_priority.value if r.proposed_priority else None,
-        "tews_total": r.tews_total,
-        "complaint": enc.presenting_complaint,
-    }
+    return {"encounter": enc.model_dump(mode="json"), "complaint": enc.presenting_complaint}
+
+
+@app.get("/api/discriminators")
+async def discriminators():
+    """The full SATS adult sign list, grouped by level — the checklist the nurse can always
+    use, whether or not the extractor suggested anything."""
+    def group(level: str, title: str, signs):
+        return {"level": level, "title": title,
+                "signs": [{"code": d.code, "label": d.label} for d in signs]}
+    return [group("RED", "Emergency signs — straight to resus", R.EMERGENCY_SIGNS),
+            group("ORANGE", "Very urgent signs", R.VERY_URGENT_SIGNS),
+            group("YELLOW", "Urgent signs", R.URGENT_SIGNS)]
 
 
 @app.get("/api/demo/deterioration")
@@ -284,16 +351,21 @@ async def demo_deterioration(seed: int = 7):
 
 @app.post("/api/assess")
 async def assess(request: Request):
-    """Run the agent to the approval gate, streaming each tool call as it happens (SSE)."""
+    """Run the agent to the approval gate, streaming each tool call as it happens (SSE).
+    The deterministic proposal is sent as soon as it is scored — before any model call."""
     body = await request.json()
     encounter = body.get("encounter", {})
-    recheck = body.get("recheck_vitals")
-    confirmed = body.get("nurse_confirmed_codes", [])
 
     async def gen():
         try:
             async for ev in _agent().astream_start(
-                    encounter, recheck_vitals=recheck, nurse_confirmed_codes=confirmed):
+                    encounter,
+                    recheck_vitals=body.get("recheck_vitals"),
+                    baseline_vitals=body.get("baseline_vitals"),
+                    nurse_confirmed_codes=body.get("nurse_confirmed_codes", []),
+                    nurse_dismissed_codes=body.get("nurse_dismissed_codes", []),
+                    prior_candidates=body.get("prior_candidates"),
+                    prior_extraction=body.get("prior_extraction")):
                 yield _sse(ev)
         except Exception as e:  # never leave the UI hanging
             yield _sse({"type": "error", "message": f"{type(e).__name__}: {e}"})
@@ -304,26 +376,60 @@ async def assess(request: Request):
 
 @app.post("/api/approve")
 async def approve(request: Request):
+    """The human gate. The rules are enforced by the agent (server-side), so a refusal comes
+    back as a clear message (HTTP 409) rather than a silent or meaningless confirmation."""
     body = await request.json()
-    enc_id = body["encounter_id"]
+    run_id = body.get("run_id")
+    if not run_id:
+        return JSONResponse({"error": "Assess the patient first."}, status_code=400)
     decision = {
         "decision": body.get("decision", "approve"),
-        "clinician_name": body.get("clinician_name", "").strip(),
+        "clinician_name": (body.get("clinician_name") or "").strip(),
         "override_priority": body.get("override_priority"),
-        "reason": body.get("reason", ""),
+        "reason": (body.get("reason") or "").strip(),
+        "signs_checked": bool(body.get("signs_checked")),
     }
-    if not decision["clinician_name"]:
-        return JSONResponse({"error": "clinician_name is required"}, status_code=400)
-    final = await _agent().approve(enc_id, decision)
-    appr = final.get("approval", {})
-    return {"status": final.get("status"),
-            "confirmed": appr.get("confirmed", {}),
-            "trace": final.get("trace", [])}
+    try:
+        final = await _agent().approve(run_id, decision)
+    except ApprovalError as e:
+        return JSONResponse({"error": str(e)}, status_code=409)
+    except Exception as e:
+        return JSONResponse({"error": f"Could not record the decision: {e}"}, status_code=500)
+    confirmed = (final.get("approval") or {}).get("confirmed") or {}
+    if not confirmed.get("confirmed_priority"):
+        return JSONResponse({"error": "The decision was not recorded — assess again."},
+                            status_code=500)
+    enc = final.get("encounter") or {}
+    result = final.get("result") or {}
+    # The irreversible action: this patient now has a place in the queue.
+    _state["confirmed"] = [c for c in _state["confirmed"]
+                           if c["encounter"].get("encounter_id") != enc.get("encounter_id")]
+    _state["confirmed"].append({
+        "encounter": enc, "priority": confirmed["confirmed_priority"],
+        "proposed": confirmed.get("proposed_priority"), "decision": confirmed.get("decision"),
+        "clinician": confirmed.get("clinician"), "tews_total": result.get("tews_total"),
+        "complaint": enc.get("presenting_complaint", ""),
+        "arrival": enc.get("arrival_time") or time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "confirmed_at": time.strftime("%H:%M"),
+    })
+    return {"status": final.get("status"), "confirmed": confirmed, "trace": final.get("trace", [])}
+
+
+@app.post("/api/narrate")
+async def narrate(request: Request):
+    """Optional model-written handover note for a scored run (checked before it is shown).
+    Off unless TRIAGEFLOW_HANDOVER_NOTE=1. Returns {"note": null} when disabled, when the
+    model is off or slow, or when its note failed the check."""
+    body = await request.json()
+    if not settings.handover_note:
+        return {"note": None}
+    try:
+        note = await _agent().narrate(body.get("run_id", ""))
+    except Exception:
+        note = None
+    return {"note": note}
 
 
 @app.get("/api/encounter/{encounter_id}/audit")
 async def encounter_audit(encounter_id: str):
     return audit.trail(encounter_id)
-
-
-# Model download + switching is handled by /api/model/select (download-if-needed, then switch).

@@ -13,8 +13,10 @@ work against any other MCP server a facility already runs.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -63,29 +65,48 @@ def _connections() -> dict[str, dict[str, Any]]:
 
 
 class TriageMCP:
-    """Lazy wrapper around MultiServerMCPClient; indexes tools by name."""
+    """Lazy wrapper around MultiServerMCPClient; indexes tools by name.
 
-    def __init__(self, include_filesystem: bool = True):
+    Our own server is required and connects first (fast, local). The borrowed filesystem
+    server is optional: it is fetched by ``npx`` and may be slow or unreachable on a clinic
+    connection, so it has a timeout and can be connected in the background — the app must
+    never wait on the network before it can triage a patient.
+    """
+
+    def __init__(self, include_filesystem: bool = True, filesystem_timeout: float = 45.0):
         self.include_filesystem = include_filesystem
-        self._client: MultiServerMCPClient | None = None
+        self.filesystem_timeout = filesystem_timeout
         self._tools: dict[str, Any] = {}
+        self._protocol_cache: dict[str, str] = {}
         self.connected_servers: list[str] = []
+        self.protocol_source = "local file"
 
-    async def connect(self) -> dict[str, Any]:
-        conns = _connections()
-        if not self.include_filesystem:
-            conns.pop("filesystem", None)
-        self._client = MultiServerMCPClient(conns)
-        try:
-            tools = await self._client.get_tools()
-        except Exception:
-            # Fall back to own-server only if the borrowed server can't start (e.g. no npx/net).
-            conns.pop("filesystem", None)
-            self._client = MultiServerMCPClient(conns)
-            tools = await self._client.get_tools()
+    async def connect(self, wait_for_filesystem: bool = True) -> dict[str, Any]:
+        """Connect our own server; then the borrowed one (awaited unless told otherwise —
+        pass ``wait_for_filesystem=False`` and schedule ``connect_filesystem()`` yourself)."""
+        own = MultiServerMCPClient({"triageflow": _connections()["triageflow"]})
+        tools = await own.get_tools()
         self._tools = {t.name: t for t in tools}
-        self.connected_servers = list(conns.keys())
+        self.connected_servers = ["triageflow"]
+        if self.include_filesystem and wait_for_filesystem:
+            await self.connect_filesystem()
         return self._tools
+
+    async def connect_filesystem(self) -> bool:
+        """Attach the borrowed filesystem MCP. Returns False (never raises) if Node/npx is
+        missing, the package can't be fetched, or it doesn't answer within the timeout."""
+        if "filesystem" in self.connected_servers:
+            return True
+        if shutil.which("npx") is None:
+            return False
+        try:
+            fs = MultiServerMCPClient({"filesystem": _connections()["filesystem"]})
+            tools = await asyncio.wait_for(fs.get_tools(), timeout=self.filesystem_timeout)
+        except Exception:
+            return False
+        self._tools.update({t.name: t for t in tools})
+        self.connected_servers.append("filesystem")
+        return True
 
     @property
     def tools(self) -> dict[str, Any]:
@@ -105,17 +126,63 @@ class TriageMCP:
 
     async def read_protocol(self, filename: str = "sats_adult.md") -> str:
         """Fetch protocol text via the borrowed filesystem MCP (tool name varies by version),
-        falling back to a direct read so evidence retrieval never hard-fails."""
+        falling back to a direct read so evidence retrieval never hard-fails. The text is
+        static, so a successful MCP read is cached for the life of the process."""
+        if filename in self._protocol_cache:
+            self.protocol_source = "filesystem (borrowed MCP, cached)"
+            return self._protocol_cache[filename]
         path = str(settings.protocols_dir / filename)
-        for tool_name, arg in (("read_text_file", {"path": path}),
-                               ("read_file", {"path": path})):
+        for tool_name in ("read_text_file", "read_file"):
             if self.has(tool_name):
                 try:
-                    res = await self.call(tool_name, arg)
-                    return res if isinstance(res, str) else str(res)
+                    res = await asyncio.wait_for(self.call(tool_name, {"path": path}), timeout=20)
+                    text = res if isinstance(res, str) else str(parse_tool_result(res))
+                    if text.strip():
+                        self._protocol_cache[filename] = text
+                        self.protocol_source = "filesystem (borrowed MCP)"
+                        return text
                 except Exception:
                     continue
-        try:
-            return Path(path).read_text()
-        except OSError:
-            return ""
+        self.protocol_source = "local file (fallback)"
+        return read_protocol_file(filename)
+
+
+def read_protocol_file(filename: str = "sats_adult.md") -> str:
+    """Direct, UTF-8 read of a protocol file ('' if unreadable). UTF-8 is explicit because
+    the Windows default codepage cannot decode the protocol text."""
+    try:
+        return (settings.protocols_dir / filename).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+class InProcessMCP:
+    """The same tool surface as ``TriageMCP`` but calling our server's tool functions directly
+    — no subprocess. For unit tests and the eval harness, so the full agent flow (validation →
+    scoring → approval gate) can be exercised quickly and offline. The app itself always uses
+    the real MCP transport."""
+
+    connected_servers = ["triageflow (in-process)"]
+    protocol_source = "local file"
+
+    def __init__(self) -> None:
+        from ..mcp import server
+        self._fns = {name: getattr(server, name) for name in (
+            "validate_triage_input", "score_triage", "check_deterioration",
+            "request_clinician_approval", "suggest_discriminators", "fetch_fhir_vitals")}
+
+    @property
+    def tools(self) -> dict[str, Any]:
+        return self._fns
+
+    def has(self, name: str) -> bool:
+        return name in self._fns
+
+    async def call(self, name: str, args: dict[str, Any]) -> Any:
+        return self._fns[name](**args)
+
+    async def call_json(self, name: str, args: dict[str, Any]) -> Any:
+        return await self.call(name, args)
+
+    async def read_protocol(self, filename: str = "sats_adult.md") -> str:
+        return read_protocol_file(filename)

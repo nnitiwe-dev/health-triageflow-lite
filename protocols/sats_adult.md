@@ -33,15 +33,16 @@ patients require the paediatric pathway (out of scope for this version).
 
 ## 2. Final priority rule (five-step approach)
 
-1. **Emergency signs** present → **RED**, go straight to resus (no TEWS needed).
-2. Else check **very urgent** signs → at least **ORANGE**.
-3. Else check **urgent** signs → at least **YELLOW**.
-4. Measure vitals and compute the **TEWS** (section 4); map the score to a band (section 3).
-5. **Final priority = the highest acuity** implied by the discriminator signs and the TEWS band.
-   A **Senior Health Care Professional (SHCP)** may override the computed level at their
-   discretion — this is the mandatory human gate.
+1. **Look for emergency signs** and ask for the presenting complaint. Any emergency sign →
+   **RED**, straight to resus — a TEWS does **not** need to be calculated first.
+2. **Look for very urgent or urgent signs** → at least **ORANGE** / **YELLOW**.
+3. **Measure the vital signs and calculate the TEWS** (section 4); map it to a band (section 3).
+4. **Check the key additional investigations** (section 6) — they may change the priority.
+5. **Assign the final priority = the highest acuity** implied by the signs and the TEWS band.
+   The **senior healthcare professional (SHCP)** — clinical nurse practitioner or doctor — may
+   override the final priority at their discretion. This is the mandatory human gate.
 
-*Source: SATS Training Manual 2012, "The five step approach" and the Adult SATS process flowchart (Figure 2 / Figure 4).*
+*Source: SATS Training Manual 2012, Section 2.1 "The five step approach" and the SATS process flowchart (Figure 2 / Figure 4).*
 
 ## 3. TEWS band → priority
 
@@ -77,7 +78,7 @@ The TEWS is the sum of points for seven parameters. Each parameter scores 0–3.
 - Obstructed airway / not breathing
 - Current (active) seizure
 - Facial or inhalation burn
-- Hypoglycaemia — glucose less than 3 mmol/L
+- Hypoglycaemia (glucose 3 mmol/L or less)
 - Cardiac arrest
 
 ### 5.2 Very urgent signs → ORANGE (< 10 min)
@@ -86,37 +87,72 @@ The TEWS is the sum of points for seven parameters. Each parameter scores 0–3.
 - Coughing blood
 - Chest pain
 - Stabbed neck
-- Uncontrolled haemorrhage (arterial bleed)
-- Post-ictal (after a seizure)
+- Uncontrolled haemorrhage (arterial)
+- Post-ictal (after seizure)
 - Acute focal neurology (stroke)
 - Aggression
 - Threatened limb
 - Eye injury
-- Dislocation of a larger joint (not finger or toe)
-- Compound fracture (break in the skin)
-- Burn over 20%; electrical, circumferential, or chemical burn
+- Dislocation of a larger joint
+- Compound fracture (break in skin)
+- Burn >20% / electrical / circumferential / chemical
 - Poisoning / overdose
-- Diabetic — glucose over 11 mmol/L with ketonuria
+- Diabetic glucose >11 with ketonuria
 - Vomiting fresh blood
-- Pregnancy with abdominal trauma or abdominal pain
+- Pregnancy with abdominal trauma or pain
 - Severe pain
-- High-energy transfer (severe mechanism of injury)
+- High-energy transfer (severe mechanism)
+
+"Reduced / confused level of consciousness" means **any patient who is not fully alert**
+(confused, or responding only to voice or to pain, or unresponsive). It therefore follows
+directly from the AVPU observation.
 
 ### 5.3 Urgent signs → YELLOW (< 1 hour)
 - Controlled haemorrhage
-- Dislocation of a finger or toe
+- Dislocation of finger or toe
 - Closed fracture (no break in skin)
 - Other burn
 - Abdominal pain
-- Diabetic — glucose over 17 mmol/L (no ketonuria)
+- Diabetic glucose >17 (no ketonuria)
 - Persistent vomiting
 - Pregnancy with trauma
-- Pregnancy with PV (vaginal) bleed
+- Pregnancy with PV bleed
 - Moderate pain
 
-## 6. Additional investigations (may change priority)
-- If RR scores ≥ 1 on TEWS → check **SpO₂** and hand to SHCP for oxygen. SpO₂ < 92% is a red flag.
-- Diabetic / altered consciousness → finger-prick **glucose**; < 3 mmol/L → emergency.
-- Chest pain → immediate ECG and hand to SHCP.
+**Pain.** The manual defines severe pain as unbearable (the worst the patient has ever felt)
+and moderate pain as intense but bearable; mild pain is any other pain. *TriageFlow
+convention (not from the manual):* a 0–10 pain score of 7–10 is offered as
+severe and 4–6 as moderate, for the nurse to confirm.
 
-*Source: SATS Training Manual 2012, "Check for additional investigations" (Adult SATS Chart) and Section 6.*
+*Source: SATS Training Manual 2012, Adult SATS Chart (Figure 4) and Section 3 "Adult clinical signs".*
+
+## 6. Additional investigations (may change priority)
+
+These are the adult chart's own prompts. The tool surfaces them as "do now" actions; it
+performs none of them.
+
+| When | Do |
+|------|----|
+| Respiratory rate scores 1 point or more on the TEWS | Check SpO₂ and hand over to the SHCP to give oxygen |
+| Reduced level of consciousness (not alert, including confused) | Finger-prick glucose test and hand over to the SHCP |
+| Unable to sit up / needs to lie down | Finger-prick glucose test and hand over to the SHCP |
+| Active seizure / fitting, or recent seizure | Finger-prick glucose test and hand over to the SHCP |
+| History of diabetes | Finger-prick glucose test |
+| Hypoglycaemia — glucose 3 mmol/L or less | Move to resus and hand over to the SHCP (emergency, RED) |
+| Diabetes and hyperglycaemia — glucose 11 mmol/L or more | Urine dipstick to check for ketones |
+| Chest pain | Immediate ECG and hand over to the SHCP |
+| Abdominal pain or backache in a female patient | Urine dipstick and urine pregnancy test |
+
+*Source: SATS Training Manual 2012, Adult SATS Chart "Check for additional investigations" (Figure 4) and Section 6.*
+
+## 7. Local conventions that are NOT part of SATS
+
+Shown to the nurse labelled as local rules — never presented as SATS.
+
+- **SpO₂ safety floor.** The SATS *adult* chart gives no SpO₂ threshold: it says to check
+  SpO₂ and hand over to the SHCP for oxygen. (The < 92% → resus rule is on the *paediatric*
+  chart.) As a conservative local rule, an adult SpO₂ below 92% is raised
+  to at least ORANGE so the patient is seen within 10 minutes.
+- **Deterioration watch.** A re-check that scores worse than the baseline raises a
+  second-look flag for a clinician. It never moves the patient by itself.
+- **Scope.** Patients younger than 12 years are not scored: the paediatric SATS chart applies.

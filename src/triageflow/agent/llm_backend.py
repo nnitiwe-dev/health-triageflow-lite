@@ -50,7 +50,7 @@ class LLMBackend(Protocol):
     def resolve_model(self) -> tuple[str | None, bool]: ...
     def pull_model(self, model_id: str,
                    on_progress: Callable[[str], None] | None = None) -> bool: ...
-    def set_active_model(self, model_id: str) -> None: ...
+    def set_active_model(self, model_id: str) -> bool | None: ...
     def active_model(self) -> str | None: ...
     def status(self) -> BackendStatus: ...
 
@@ -60,13 +60,17 @@ def make_chat_model(base_url: str, model: str, *, temperature: float = 0.0,
     """One chat client for every backend: an OpenAI-compatible client pointed at base_url.
     (Local servers need no real key — a placeholder keeps the SDK happy.)"""
     from langchain_openai import ChatOpenAI
+    # max_retries=0: a local server that is slow or down should fail fast into the
+    # deterministic fallback, not be retried while a nurse waits.
     return ChatOpenAI(model=model, base_url=base_url.rstrip("/"), api_key="sk-no-auth-local",
-                      temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+                      temperature=temperature, max_tokens=max_tokens, timeout=timeout,
+                      max_retries=0)
 
 
 def get_backend(backend: str | None = None) -> LLMBackend:
-    """Resolve the backend. ``auto`` = use whatever is already installed (Ollama preferred for
-    its zero-friction model pulls), else fall back to llama.cpp (which can self-provision)."""
+    """Resolve the backend. ``auto`` = reuse what is already installed — llama.cpp first (the
+    project's primary runtime: no daemon, no GUI), else an installed Ollama — and if neither
+    is present, llama.cpp, which self-provisions its prebuilt binary on every OS."""
     from ..core.config import settings
     from .llamacpp_backend import LlamaCppBackend
     from .ollama_backend import OllamaBackend
@@ -76,10 +80,11 @@ def get_backend(backend: str | None = None) -> LLMBackend:
         return OllamaBackend()
     if name == "llamacpp":
         return LlamaCppBackend()
-    # auto: prefer an already-installed runtime; else llama.cpp (self-provisions on Windows,
-    # guides the user on macOS/Linux).
+    llama = LlamaCppBackend()
+    if llama.runtime_installed():
+        return llama
     ollama = OllamaBackend()
     if ollama.runtime_installed():
         return ollama
     # neither installed → llama.cpp (it can self-provision; Ollama's installer needs admin/GUI)
-    return LlamaCppBackend()
+    return llama

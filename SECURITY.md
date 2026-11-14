@@ -15,17 +15,19 @@ TriageFlow Lite is a prototype, **not a medical device**. Still, it is designed 
 privacy-preserving defaults:
 
 - **No real patient data** is shipped or required. The project runs on synthetic data only.
-- **Local inference.** The open-weights model runs locally via a pluggable runtime (Ollama or
-  llama.cpp); patient data entered into a deployment does not leave the machine. The configured
+- **Local inference.** The open-weights model runs locally via a pluggable runtime (llama.cpp or
+  Ollama); patient data entered into a deployment does not leave the machine. The configured
   data region is surfaced in the UI.
-- **Audit log contents.** `~/.triageflow/audit.{jsonl,db}` records tool inputs/outputs,
-  timestamps, and approver names. In a real deployment this is sensitive operational data:
+- **Audit log contents.** `~/.triageflow/audit.jsonl` and `~/.triageflow/triageflow.db`
+  record tool inputs/outputs, timestamps, and approver names. In a real deployment this is sensitive operational data:
   it is git-ignored, and an operator must apply appropriate file permissions, retention, and
   access controls. Do not commit audit logs or databases.
 - **Borrowed filesystem MCP** is started with a single allowed directory (`protocols/`) and is
   used read-only. Do not widen its allowed roots to directories containing sensitive data.
 - **No telemetry.** The application makes no outbound network calls except, on first run, the
-  model download (Ollama registry) and loading front-end assets from public CDNs.
+  runtime and model download (llama.cpp GitHub releases, Hugging Face, or the Ollama
+  registry), the optional `npx` fetch of the filesystem MCP, and loading front-end assets
+  from public CDNs.
 
 ## Things to check before any pilot
 
