@@ -19,7 +19,7 @@ intact.
 ## Dev setup
 
 ```bash
-uv run triageflow doctor         # checks Ollama + model + both MCP servers
+uv run triageflow doctor         # checks the model runtime, model and both MCP servers
 uv run --extra dev python -m pytest   # unit tests
 uv run python evals/run.py            # scenario evals + determinism
 uv run --extra dev ruff check src tests   # lint
@@ -31,7 +31,11 @@ Python ≥ 3.11. The project uses `uv`; `uv run` auto-syncs the environment.
 
 - Keep PRs small and scoped. Match the surrounding code's style and comment density.
 - Add/adjust tests: new TEWS logic → `tests/test_scoring.py`; new lexicon phrases →
-  `tests/test_lexicon.py`; new behaviour → an `evals/cases.py` case.
+  `tests/test_lexicon.py`; anything touching the run or the approval gate →
+  `tests/test_agent_flow.py`; a new synthetic scenario is picked up by
+  `tests/test_synthetic.py` automatically; new behaviour → an `evals/cases.py` case.
+- Do **not** tune the keyword lexicon to `evals/cases.py::PARAPHRASES` — that set is held out
+  to measure recall honestly.
 - Run `pytest`, `evals/run.py`, and `ruff` before opening the PR. CI runs all three.
 - Update docs if you change behaviour (README / ARCHITECTURE / MCP / DATA / EVALS).
 

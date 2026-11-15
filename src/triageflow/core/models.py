@@ -58,13 +58,24 @@ class Encounter(BaseModel):
 class Evidence(BaseModel):
     """One sourced reason behind the priority. Every priority must cite entries like these."""
 
-    kind: str                 # "tews" | "discriminator" | "additional_investigation"
+    # "tews" | "discriminator" | "additional_investigation" | "safety_rule" (local, not SATS)
+    kind: str
     parameter: str            # e.g. "heart_rate" or "chest_pain"
     observed: str             # the value / assertion that triggered it
     points: int | None = None    # TEWS points contributed (None for discriminators)
     band_label: str | None = None
     implies: Priority | None = None  # priority a discriminator implies
     source: str = ""          # citation string
+
+
+class Action(BaseModel):
+    """A SATS 'additional investigation / task' the nurse should do now. Never a treatment
+    decision by the agent - these are the chart's own prompts, each with its source."""
+
+    code: str                 # stable slug, e.g. "check_spo2"
+    text: str                 # what to do, in plain words
+    reason: str               # why it was triggered for this patient
+    source: str = ""
 
 
 class TriageResult(BaseModel):
@@ -79,8 +90,11 @@ class TriageResult(BaseModel):
     target_time: str | None = None
     disposition: str | None = None
     evidence: list[Evidence] = Field(default_factory=list)
+    actions: list[Action] = Field(default_factory=list)   # SATS investigations/tasks to do now
     missing: list[str] = Field(default_factory=list)      # observations needed but absent
     warnings: list[str] = Field(default_factory=list)     # implausible / stale / contradictory
+    ignored_codes: list[str] = Field(default_factory=list)  # unknown sign codes (never silent)
+    out_of_scope: bool = False  # True => adult SATS does not apply (paediatric patient)
     complete: bool = False     # False => do NOT show a band; needs more data / review
     computed_at: datetime = Field(default_factory=_utcnow)
 

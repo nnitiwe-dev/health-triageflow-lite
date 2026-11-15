@@ -36,9 +36,10 @@ def _normalize_ollama_host(raw: str) -> str:
 
 @dataclass
 class Settings:
-    # Which local open-weights runtime to use. "auto" (default) detects what's already on the
-    # machine (Ollama or llama.cpp) and uses it — no redundant setup; only if neither is present
-    # does it set one up. Force one with "ollama" or "llamacpp". All keep data on the machine.
+    # Which local open-weights runtime to use. "auto" (default) = llama.cpp: it sets up its own
+    # ~25 MB prebuilt binary on any OS and reuses model files Ollama already downloaded. Ollama
+    # is used automatically only where llama.cpp cannot run; force it with "ollama". All keep
+    # data on the machine.
     llm_backend: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLM_BACKEND", "auto").lower())
 
     # Open-weights model served locally (data never leaves the machine).
@@ -56,6 +57,17 @@ class Settings:
     llamacpp_ctx: int = field(default_factory=lambda: int(_env("TRIAGEFLOW_LLAMACPP_CTX", "4096")))
     llamacpp_ngl: int = field(default_factory=lambda: int(_env("TRIAGEFLOW_LLAMACPP_NGL", "999")))
     llamacpp_default_model: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLAMACPP_MODEL", "qwen2.5-7b-instruct-q4"))
+    # Reuse a GGUF that Ollama already downloaded instead of fetching it again (set 0 to disable).
+    reuse_ollama_models: bool = field(default_factory=lambda: _env("TRIAGEFLOW_REUSE_OLLAMA_MODELS", "1") != "0")
+
+    # How long the nurse waits for the model's sign suggestions before the keyword matches are
+    # used on their own (the priority itself never waits for the model).
+    extract_timeout_s: float = field(default_factory=lambda: float(_env("TRIAGEFLOW_EXTRACT_TIMEOUT", "30")))
+
+    # Model-written handover note: OFF by default. In testing the 7B model sometimes turned a
+    # prompt ("do a glucose test") into a claim ("glucose test done"). The deterministic
+    # summary is the handover; set TRIAGEFLOW_HANDOVER_NOTE=1 to also show the model's note.
+    handover_note: bool = field(default_factory=lambda: _env("TRIAGEFLOW_HANDOVER_NOTE", "0") == "1")
 
     # Data residency guard — recorded in the audit log and shown in the UI.
     data_region: str = field(default_factory=lambda: _env("TRIAGEFLOW_DATA_REGION", "local-only"))

@@ -25,8 +25,36 @@ def test_red_flag_phrases_surface_candidate(phrase, expected):
     assert expected in suggest_codes(phrase)
 
 
-def test_benign_text_surfaces_nothing_urgent():
-    assert suggest_codes("here for a routine blood pressure check") == []
+@pytest.mark.parametrize("phrase,expected", [
+    ("heart attack?", "chest_pain"),
+    ("difficulty in breathing since morning", "sob_acute"),
+    ("took rat poison 1 hour ago", "poisoning_overdose"),
+    ("pregnant 32wks, bleeding", "pregnancy_pv_bleed"),
+    ("weak on left side since morning, mouth twisted", "focal_neuro_acute"),
+    ("RTA, thrown off boda boda", "high_energy_transfer"),
+    ("convulsed at home this morning", "post_ictal"),
+    ("fainted at home, now awake", "loc_reduced"),
+    ("not breathing on arrival", "airway_obstructed"),
+    ("vomiting since last night, not keeping fluids down", "vomiting_persistent"),
+])
+def test_everyday_phrasings_surface_candidate(phrase, expected):
+    assert expected in suggest_codes(phrase)
+
+
+@pytest.mark.parametrize("text", [
+    "here for a routine blood pressure check",
+    "omeprazole 20mg od, here for refill",          # "od" = once daily, not overdose
+    "GCS 15, walking, here for review of a healed wound",
+    "Here for repeat BP medication, feels well. No headache, no chest pain, no SOB.",
+])
+def test_benign_text_surfaces_nothing_urgent(text):
+    assert suggest_codes(text) == []
+
+
+def test_combined_phrases_need_every_part():
+    assert "pregnancy_pv_bleed" not in suggest_codes("bleeding from a cut on the hand")
+    assert "pregnancy_pv_bleed" not in suggest_codes("pregnant, no bleeding")
+    assert "pregnancy_pv_bleed" in suggest_codes("pregnant and bleeding since morning")
 
 
 @pytest.mark.parametrize("text,code", [

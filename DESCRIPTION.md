@@ -11,19 +11,21 @@ itself stops being where the risk hides. It is built on the **South African Tria
 (Adult / TEWS)**: an African, physiologically-scored scale whose per-vital points make every
 priority citable.
 
-The agent is a LangGraph state machine that, visibly, validates the input, extracts candidate
-signs from free text *for the nurse to confirm*, retrieves the cited protocol text from a
-borrowed filesystem MCP server, scores the priority **deterministically** via our own MCP
-server, checks that every point is sourced and grounded, and then **pauses at an approval
-gate**. Nothing reaches a queue position until a named clinician approves or overrides. If a
-waiting patient is re-checked and has worsened, the agent raises a deterioration flag for a
-second look — it never moves the patient itself.
+The agent is a LangGraph state machine that, visibly, validates the input, retrieves the
+protocol text from a borrowed filesystem MCP server, scores the priority **deterministically**
+via our own MCP server — on screen within seconds, with the reasons in plain words and the
+chart's "do now" checks — verifies every point against the protocol, suggests signs from the
+free-text complaint *for the nurse to accept or dismiss*, and then **pauses at an approval
+gate**. Nothing reaches the queue until a named clinician confirms; the gate refuses an
+incomplete result, an unreviewed sign, or an override without a reason. If a waiting patient
+is re-checked and has worsened, the agent raises a flag for a second look — it never moves
+the patient itself.
 
 The defensibility idea is a strict split: the **clinical score is pure deterministic code**
 (zero run-to-run variance, a citation for every point), and the open-weights model
-(Qwen2.5-7B via a local runtime — Ollama or llama.cpp — Llama-3.2-3B fallback) only extracts candidate signs and writes
-the one-line handover. Every tool call and the named approval are written to an append-only
-audit log, so a priority can survive a clinical-audit question.
+(Qwen2.5 via local llama.cpp, or Ollama if already installed) only suggests signs for the
+nurse to review. Every tool call and the named approval are written to an append-only audit
+log, so a priority can survive a clinical-audit question.
 
 Data is synthetic and FHIR R4-shaped (LOINC-coded vitals); no SNOMED CT (licensing) and no
 real patient data. Patient data never leaves the machine. Runs in one command:

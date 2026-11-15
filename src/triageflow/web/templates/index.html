@@ -55,7 +55,7 @@
     <section class="mb-5">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-[12px] font-semibold uppercase tracking-wide text-subtle">Waiting queue · seen first <span class="normal-case">(#1, left)</span> → last</h2>
-        <button id="btn-refresh-queue" class="text-[12px] text-subtle hover:text-ink">↻ regenerate</button>
+        <span class="text-[11px] text-subtle">patients you confirm appear here · grey “demo” cards are synthetic backdrop</span>
       </div>
       <div id="queue" class="flex gap-2 overflow-x-auto pb-1"></div>
     </section>
@@ -63,39 +63,58 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
       <!-- Panel 1: intake -->
       <section class="card">
-        <div class="card-h">1 · Patient intake</div>
+        <div class="card-h flex items-center justify-between">
+          <span>1 · Patient intake</span>
+          <button id="btn-new" class="btn-sm border border-line bg-white normal-case tracking-normal">+ New patient</button>
+        </div>
         <div class="p-4 space-y-3">
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-3 gap-3">
             <label class="field"><span>Encounter</span><input id="f-id" readonly class="bg-gray-50"/></label>
-            <label class="field"><span>Age</span><input id="f-age" type="number" placeholder="e.g. 54"/></label>
+            <label class="field"><span>Age (years)</span><input id="f-age" type="number" min="0" placeholder="e.g. 54"/></label>
+            <label class="field"><span>Sex</span>
+              <select id="f-sex"><option value="">—</option><option value="female">Female</option><option value="male">Male</option></select></label>
           </div>
-          <label class="field"><span>Presenting complaint</span>
-            <textarea id="f-complaint" rows="2" placeholder="e.g. central chest pain radiating to left arm"></textarea></label>
+          <label class="field"><span>Presenting complaint <span class="font-normal">(in the patient’s or your own words)</span></span>
+            <textarea id="f-complaint" rows="2" placeholder="e.g. central chest pain x1hr, radiating to L arm, sweating"></textarea></label>
+
+          <!-- SATS step 1: emergency signs first, before any vitals -->
+          <fieldset class="emerg">
+            <legend>Emergency signs — tick if present</legend>
+            <div class="text-[11px] text-red-800 mb-1.5">RED, straight to resus — no vitals needed.</div>
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+              <label class="tick"><input type="checkbox" class="emerg-tick" value="airway_obstructed"/><span>Not breathing / airway blocked</span></label>
+              <label class="tick"><input type="checkbox" class="emerg-tick" value="cardiac_arrest"/><span>Cardiac arrest</span></label>
+              <label class="tick"><input type="checkbox" class="emerg-tick" value="seizure_active"/><span>Seizing now</span></label>
+              <label class="tick"><input type="checkbox" class="emerg-tick" value="burn_face_inhalation"/><span>Burn to face / inhaled smoke</span></label>
+            </div>
+          </fieldset>
+
           <div class="grid grid-cols-3 gap-3">
-            <label class="field"><span>Resp. rate</span><input id="f-rr" type="number" placeholder="/min"/></label>
-            <label class="field"><span>Pulse rate (HR)</span><input id="f-hr" type="number" placeholder="bpm"/></label>
-            <label class="field"><span>Temp °C</span><input id="f-temp" type="number" step="0.1" placeholder="37.0"/></label>
+            <label class="field"><span>Breathing rate</span><input id="f-rr" class="vital" type="number" placeholder="/min"/></label>
+            <label class="field"><span>Pulse rate</span><input id="f-hr" class="vital" type="number" placeholder="bpm"/></label>
+            <label class="field"><span>Temp °C</span><input id="f-temp" class="vital" type="number" step="0.1" placeholder="36.8"/></label>
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <label class="field"><span>Systolic BP</span><input id="f-sbp" type="number" placeholder="mmHg"/></label>
-            <label class="field"><span>Diastolic BP</span><input id="f-dbp" type="number" placeholder="mmHg"/></label>
-            <label class="field"><span>SpO₂ %</span><input id="f-spo2" type="number" placeholder="opt"/></label>
+            <label class="field"><span>Systolic BP</span><input id="f-sbp" class="vital" type="number" placeholder="mmHg"/></label>
+            <label class="field"><span>Diastolic BP</span><input id="f-dbp" class="vital" type="number" placeholder="mmHg"/></label>
+            <label class="field"><span>SpO₂ %</span><input id="f-spo2" class="vital" type="number" placeholder="if measured"/></label>
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <label class="field"><span>Glucose</span><input id="f-glucose" type="number" step="0.1" placeholder="mmol/L"/></label>
-            <label class="field"><span>Weight (kg)</span><input id="f-weight" type="number" step="0.1" placeholder="opt"/></label>
-            <label class="field"><span>Pain (0–10)</span><input id="f-pain" type="number" min="0" max="10" placeholder="0–10"/></label>
+            <label class="field"><span>Glucose</span><input id="f-glucose" class="vital" type="number" step="0.1" placeholder="mmol/L"/></label>
+            <label class="field"><span>Weight (kg)</span><input id="f-weight" class="vital" type="number" step="0.1" placeholder="optional"/></label>
+            <label class="field"><span>Pain (0–10)</span><input id="f-pain" class="vital" type="number" min="0" max="10" placeholder="0–10"/></label>
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <label class="field"><span>AVPU</span>
-              <select id="f-avpu"><option value="">—</option><option>alert</option><option>voice</option><option>confused</option><option>pain</option><option>unresponsive</option></select></label>
+            <label class="field"><span>Alertness (AVPU)</span>
+              <select id="f-avpu" class="vital"><option value="">—</option><option value="alert">Alert</option><option value="confused">Confused</option><option value="voice">Responds to voice</option><option value="pain">Responds to pain</option><option value="unresponsive">Unresponsive</option></select></label>
             <label class="field"><span>Mobility</span>
-              <select id="f-mobility"><option value="">—</option><option value="walking">walking</option><option value="with_help">with help</option><option value="immobile">immobile</option></select></label>
-            <label class="field justify-end"><span>Trauma</span>
-              <label class="inline-flex items-center gap-2 h-[38px]"><input id="f-trauma" type="checkbox" class="h-4 w-4"/><span class="text-[13px] text-subtle">yes</span></label></label>
+              <select id="f-mobility" class="vital"><option value="">—</option><option value="walking">Walking</option><option value="with_help">With help</option><option value="immobile">Stretcher / immobile</option></select></label>
+            <label class="field"><span>Trauma</span>
+              <select id="f-trauma" class="vital"><option value="">—</option><option value="false">No</option><option value="true">Yes</option></select></label>
           </div>
+          <div id="recheck-note" class="hidden text-[12px] text-orange-900 bg-orange-50 border border-orange-200 rounded-md px-2.5 py-2"></div>
           <div class="flex gap-2 pt-1">
-            <button id="btn-synthetic" class="btn border border-line flex-1">Load synthetic</button>
+            <button id="btn-synthetic" class="btn border border-line flex-1">Load synthetic patient</button>
             <button id="btn-fhir" class="btn border border-line flex-1 hidden">Import from EMR</button>
           </div>
           <button id="btn-assess" class="btn bg-ink text-white w-full mt-2">Assess priority →</button>
@@ -104,53 +123,85 @@
         </div>
       </section>
 
-      <!-- Panel 2: agent activity -->
+      <!-- Panel 2: signs + agent activity -->
       <section class="card">
-        <div class="card-h">2 · Agent activity <span id="agent-spin" class="hidden ml-2 text-subtle">running…</span></div>
-        <div class="p-4">
-          <ol id="trace" class="space-y-2 text-[13px]"></ol>
-          <div id="candidates-wrap" class="hidden mt-4 pt-3 border-t border-line">
-            <div class="text-[12px] font-semibold text-subtle mb-2">Candidate signs — confirm before they count</div>
+        <div class="card-h">2 · Signs to confirm <span id="agent-spin" class="hidden ml-2 text-subtle normal-case tracking-normal">working…</span></div>
+        <div class="p-4 space-y-4">
+          <div>
+            <div class="sec-h">Suggested from the complaint — mark each one</div>
+            <div id="extract-note" class="hidden note-amber mb-2"></div>
             <div id="candidates" class="space-y-1.5"></div>
-            <button id="btn-rescore" class="hidden btn-sm bg-ink text-white mt-3">Re-score with confirmed signs</button>
+            <div id="candidates-empty" class="text-[12.5px] text-subtle">Nothing suggested yet. Assess a patient, or tick signs in the full list below.</div>
           </div>
+          <details id="checklist-wrap" class="fold">
+            <summary>Full SATS sign list <span id="checklist-count" class="text-subtle font-normal"></span></summary>
+            <div id="checklist" class="mt-2 space-y-3"></div>
+          </details>
+          <details class="fold" open>
+            <summary>Agent activity <span class="text-subtle font-normal">(every tool call, live)</span></summary>
+            <ol id="trace" class="space-y-2 text-[13px] mt-2"></ol>
+          </details>
         </div>
       </section>
 
       <!-- Panel 3: proposal + approval -->
       <section class="card">
-        <div class="card-h">3 · Proposed priority <span class="text-subtle font-normal">· clinician confirms</span></div>
+        <div class="card-h">3 · Proposed priority <span class="text-subtle font-normal normal-case tracking-normal">· you confirm</span></div>
         <div class="p-4">
-          <div id="empty-proposal" class="text-[13px] text-subtle py-8 text-center">Run an assessment to see a sourced priority here.</div>
+          <div id="empty-proposal" class="text-[13px] text-subtle py-8 text-center">Assess a patient to see a sourced priority here.</div>
+          <div id="blocked" class="hidden note-red"></div>
           <div id="proposal" class="hidden space-y-4">
+            <div id="stale" class="hidden note-amber">The intake has changed since this result — press <b>Assess priority</b> again before confirming.</div>
+            <div id="pending" class="hidden note-amber"></div>
             <div id="band" class="rounded-lg p-4 text-white">
-              <div class="flex items-baseline justify-between">
-                <div id="band-label" class="text-2xl font-bold"></div>
-                <div id="band-time" class="text-[13px] opacity-90"></div>
-              </div>
-              <div id="band-disp" class="text-[12px] opacity-90 mt-0.5"></div>
+              <div id="band-label" class="text-[22px] leading-tight font-bold"></div>
+              <div id="band-time" class="text-[15px] font-semibold mt-1"></div>
+              <div id="band-disp" class="text-[12.5px] opacity-90 mt-0.5"></div>
             </div>
-            <div id="explanation" class="text-[13px] leading-relaxed bg-gray-50 rounded-md p-3"></div>
-            <div id="deterioration" class="hidden text-[13px] rounded-md p-3 border border-orange-200 bg-orange-50 text-orange-900"></div>
-            <div>
-              <div class="text-[12px] font-semibold text-subtle mb-1.5">Evidence · every point sourced</div>
-              <ul id="evidence" class="space-y-1.5 text-[12px]"></ul>
+            <div id="explanation" class="text-[13px] leading-relaxed"></div>
+            <div id="deterioration" class="hidden note-orange"></div>
+
+            <div id="why-wrap">
+              <div class="sec-h">Why this priority</div>
+              <ul id="why" class="space-y-1 text-[13px]"></ul>
             </div>
-            <div id="verification" class="flex gap-2 text-[11px]"></div>
+            <div id="actions-wrap" class="hidden">
+              <div class="sec-h">Do now <span class="font-normal normal-case">(SATS additional investigations)</span></div>
+              <ul id="actions" class="space-y-1.5 text-[13px]"></ul>
+            </div>
+            <div id="cautions-wrap" class="hidden">
+              <div class="sec-h">Check</div>
+              <ul id="cautions" class="space-y-1 text-[12.5px]"></ul>
+            </div>
+
+            <details class="fold" id="tews-wrap">
+              <summary id="tews-title">TEWS working</summary>
+              <table class="tews mt-2"><tbody id="tews-rows"></tbody></table>
+            </details>
+            <details class="fold">
+              <summary id="sources-title">Sources</summary>
+              <ul id="evidence" class="space-y-1.5 text-[12px] mt-2"></ul>
+            </details>
+            <div id="verification" class="flex flex-wrap gap-2 text-[11px]"></div>
+            <div id="handover" class="hidden text-[12.5px] bg-gray-50 border border-line rounded-md p-3"></div>
 
             <!-- approval gate -->
-            <div class="pt-3 border-t border-line space-y-2.5">
-              <div class="text-[12px] font-semibold">Clinician approval gate</div>
-              <input id="a-name" placeholder="Approving clinician name" class="w-full"/>
-              <div class="flex items-center gap-2">
-                <select id="a-override" class="flex-1"><option value="">Approve as proposed</option>
-                  <option value="RED">Override → RED</option><option value="ORANGE">Override → ORANGE</option>
-                  <option value="YELLOW">Override → YELLOW</option><option value="GREEN">Override → GREEN</option></select>
-              </div>
-              <input id="a-reason" placeholder="Reason (required for override)" class="w-full"/>
+            <div id="gate" class="pt-3 border-t border-line space-y-2.5">
+              <div class="text-[12px] font-semibold">Clinician approval</div>
+              <input id="a-name" placeholder="Your name (approving clinician)" class="w-full"/>
+              <select id="a-override" class="w-full"><option value="">Approve as proposed</option>
+                <option value="RED">Override → RED (emergency)</option><option value="ORANGE">Override → ORANGE (very urgent)</option>
+                <option value="YELLOW">Override → YELLOW (urgent)</option><option value="GREEN">Override → GREEN (routine)</option></select>
+              <input id="a-reason" placeholder="Reason for override (required)" class="w-full hidden"/>
+              <label id="a-checked-wrap" class="tick hidden note-amber"><input id="a-checked" type="checkbox"/><span>I have checked the full sign list (panel 2) — no other signs apply. <span class="font-normal">Needed because the language model did not read this complaint.</span></span></label>
               <button id="btn-approve" class="btn bg-ink text-white w-full">Confirm priority &amp; place in queue</button>
+              <div id="gate-hint" class="text-[12px] text-amber-800"></div>
             </div>
             <div id="confirmed" class="hidden rounded-md p-3 bg-green-50 border border-green-200 text-green-900 text-[13px]"></div>
+            <div id="after" class="hidden flex gap-2">
+              <button id="btn-recheck" class="btn-sm border border-line flex-1">Re-check vitals later</button>
+              <button id="btn-new2" class="btn-sm bg-ink text-white flex-1">Next patient</button>
+            </div>
             <button id="btn-audit" class="hidden text-[12px] text-subtle hover:text-ink underline">view audit trail</button>
             <pre id="audit" class="hidden mt-2 text-[11px] bg-gray-50 rounded-md p-3 overflow-x-auto"></pre>
           </div>

@@ -37,7 +37,7 @@ def download_with_resume(url: str, dest: Path, *, label: str = "",
             with httpx.stream("GET", url, follow_redirects=True, timeout=None,
                               headers=req_headers, trust_env=False) as r:
                 if r.status_code == 416:  # range beyond file → already complete
-                    tmp.rename(dest)
+                    tmp.replace(dest)     # replace(): rename() fails on Windows if dest exists
                     return True
                 if existing and r.status_code == 200:  # server ignored Range → restart clean
                     existing, mode = 0, "wb"
@@ -53,7 +53,7 @@ def download_with_resume(url: str, dest: Path, *, label: str = "",
                             last = done
                             on_progress(f"{label} — {100 * done / total:.0f}% "
                                         f"({done >> 20}/{total >> 20} MB)")
-            tmp.rename(dest)
+            tmp.replace(dest)
             if on_progress:
                 on_progress(f"{label} — done")
             return True

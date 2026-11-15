@@ -40,16 +40,18 @@ class OllamaBackend:
         return True if om.server_up() else om.start_server(wait_s=wait_s)
 
     def installed_models(self) -> list[str]:
-        return om.list_models()
+        """What is downloaded: ask the server; if it is not running, read Ollama's own
+        manifests from disk — a stopped server must not look like 'nothing downloaded'."""
+        return om.list_models() if om.server_up() else om.models_on_disk()
 
     def is_installed(self, model_id: str) -> bool:
         # Exact tag match for the catalog (the loose base-match in ollama_manager would wrongly
         # call qwen2.5:3b-instruct "installed" just because qwen2.5:7b-instruct is present).
-        avail = om.list_models()
+        avail = self.installed_models()
         return model_id in avail or f"{model_id}:latest" in avail
 
     def catalog(self) -> list[ModelOption]:
-        avail = om.list_models()
+        avail = self.installed_models()
         return [ModelOption(mid, label, tier, size,
                             mid in avail or f"{mid}:latest" in avail)
                 for (mid, label, tier, size) in _CATALOG]
@@ -61,13 +63,25 @@ class OllamaBackend:
 
     def pull_model(self, model_id: str,
                    on_progress: Callable[[str], None] | None = None) -> bool:
+        if not om.server_up() and not om.start_server(wait_s=45):
+            if on_progress:
+                on_progress("Ollama is not running and could not be started — open the "
+                            "Ollama app and try again.")
+            return False
+        if self.is_installed(model_id):       # already on disk: nothing to download
+            self._active = model_id
+            return True
         ok = om.pull_model(model_id, on_progress=on_progress)
         if ok:
             self._active = model_id
         return ok
 
-    def set_active_model(self, model_id: str) -> None:
-        self._active = model_id  # Ollama serves many; selecting a tag is enough
+    def set_active_model(self, model_id: str) -> bool:
+        # Ollama serves many models; selecting a tag is enough — but its server must be up.
+        if not om.server_up() and not om.start_server(wait_s=45):
+            return False
+        self._active = model_id
+        return True
 
     def active_model(self) -> str | None:
         return self.resolve_model()[0]
@@ -75,11 +89,22 @@ class OllamaBackend:
     def status(self) -> BackendStatus:
         up = om.server_up()
         model, fb = self.resolve_model()
+        catalog = self.catalog()
+        have = [o for o in catalog if o.installed]
+        if model:
+            message, hint = "Ready", ""
+        elif not self.runtime_installed():
+            message, hint = "Ollama is not installed", "Install Ollama from https://ollama.com/download"
+        elif not up:
+            message = "Ollama is installed but its server is not running yet"
+            hint = ((f"Your model ({have[0].label}) is already downloaded — waiting for Ollama "
+                     "to start. If it does not, open the Ollama app.") if have else
+                    "Waiting for Ollama to start. If it does not, open the Ollama app.")
+        elif not have:
+            message, hint = "Ollama is running but no model is downloaded", "Pick a model to download."
+        else:
+            message = "Ollama is running; the model is not loaded yet"
+            hint = "Pick the downloaded model from the model menu to use it."
         return BackendStatus(
             backend="ollama", runtime_installed=self.runtime_installed(), server_up=up,
-            model=model, using_fallback=fb, catalog=self.catalog(),
-            message=("Ready" if model else
-                     "Ollama is starting or the model isn't loaded yet"),
-            hint=("" if self.runtime_installed()
-                  else "Install Ollama from https://ollama.com/download"),
-        )
+            model=model, using_fallback=fb, catalog=catalog, message=message, hint=hint)
