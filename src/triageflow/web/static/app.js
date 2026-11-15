@@ -43,7 +43,7 @@ function readVitals() {
 function readForm() {
   return {
     encounter_id: $("f-id").value || newId(),
-    age_years: num("f-age"), sex: str("f-sex"),
+    age_years: num("f-age") == null ? null : Math.trunc(num("f-age")), sex: str("f-sex"),
     presenting_complaint: $("f-complaint").value || "",
     arrival_time: S.arrival,
     discriminator_codes: [],            // signs only ever come from the nurse's own ticks
@@ -398,7 +398,7 @@ function renderModelSelect(s) {
   if (key === _catalogKey) return;        // avoid clobbering an open dropdown on every poll
   _catalogKey = key;
   $("model-select").innerHTML = cat.map(c => {
-    const tag = c.installed ? "✓" : `⤓ ${c.size_gb}GB`;
+    const tag = c.installed ? "✓ downloaded" : `⤓ ${c.size_gb} GB download`;
     const active = (c.id === s.model) ? " (active)" : "";
     return `<option value="${esc(c.id)}" ${c.id === s.model ? "selected" : ""}>${esc(c.label)} · ${tag}${active}</option>`;
   }).join("") || `<option>${esc(s.model || "none")}</option>`;
@@ -436,19 +436,25 @@ async function refreshStatus() {
   let s;
   try { s = await (await fetch("/api/status")).json(); } catch { return; }
   renderModelSelect(s);
-  const ready = !!s.model_ready || !!s.llm_off_by_config;
-  // Auto-hide the banner the moment a model is ready; poll until then so a late/cold-starting
-  // runtime clears it on its own (no manual reload, no falsely-stuck banner).
-  $("model-banner").classList.toggle("hidden", ready && !s.warming);
-  $("btn-pull").classList.toggle("hidden", !!s.warming);
-  if (s.warming) {
-    $("banner-msg").innerHTML = `Language model is loading into memory (about a minute, once). <b>Priorities already work</b>; until it finishes, signs are suggested by keyword only.`;
-    if (!_statusTimer) _statusTimer = setInterval(refreshStatus, 3000);
-    window._status = s;
-    return;
-  }
+  window._status = s;
+  const cat = s.catalog || [];
+  const onDisk = cat.find(c => c.installed);            // already downloaded, on this machine
+  const ready = (!!s.model_ready && !s.warming) || !!s.llm_off_by_config;
+  // One banner, one honest sentence about what is happening. A model that is on disk is
+  // never described as missing, and "Download" is offered only when there is nothing to use.
+  let msg = "", action = "";
+  if (ready) { /* nothing to say */ }
+  else if (s.starting) msg = `Setting up the language model${s.startup_msg ? ` — ${esc(s.startup_msg)}` : "…"}`;
+  else if (s.warming || s.model_ready) msg = `Language model is loading into memory (about a minute, once).`;
+  else if (!s.runtime_installed) { msg = `Language model runtime (<b>${esc(s.backend)}</b>) is not set up. ${esc(s.backend_hint || "")}`; action = onDisk ? "Start model" : "Set up model"; }
+  else if (onDisk && s.backend === "ollama" && !s.server_up) msg = `<b>${esc(onDisk.label)}</b> is already downloaded — waiting for Ollama to start. If it does not, open the Ollama app.`;
+  else if (onDisk) { msg = `<b>${esc(onDisk.label)}</b> is already downloaded but not running. ${esc(s.backend_hint || "")}`; action = "Start model"; }
+  else { msg = `No language model is downloaded yet. ${esc(s.backend_hint || "")}`; action = "Download model"; }
+  $("model-banner").classList.toggle("hidden", ready);
   if (!ready) {
-    $("banner-msg").innerHTML = `Language model not ready yet (<b>${esc(s.backend)}</b>). ${esc(s.backend_hint || "")} <b>Priorities still work</b> — they are calculated without it. Until it is ready, signs are suggested by keyword only, so check the full sign list.`;
+    $("banner-msg").innerHTML = `${msg} <b>Priorities still work</b> — they are calculated without it. Until it is ready, signs are suggested by keyword only, so check the full sign list.`;
+    $("btn-pull").classList.toggle("hidden", !action);
+    $("btn-pull").textContent = action || "Download model";
   }
   if (!ready && !_statusTimer) _statusTimer = setInterval(refreshStatus, 3000);
   if (ready && _statusTimer) { clearInterval(_statusTimer); _statusTimer = null; }
@@ -457,7 +463,6 @@ async function refreshStatus() {
     $("chip-fhir").textContent = "FHIR: " + (s.fhir.base_url || "").replace(/^https?:\/\//, "");
     $("chip-fhir").classList.remove("hidden");
   }
-  window._status = s;
 }
 
 function downloadDefaultModel() {

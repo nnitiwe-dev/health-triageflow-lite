@@ -68,9 +68,11 @@ def make_chat_model(base_url: str, model: str, *, temperature: float = 0.0,
 
 
 def get_backend(backend: str | None = None) -> LLMBackend:
-    """Resolve the backend. ``auto`` = reuse what is already installed — llama.cpp first (the
-    project's primary runtime: no daemon, no GUI), else an installed Ollama — and if neither
-    is present, llama.cpp, which self-provisions its prebuilt binary on every OS."""
+    """Resolve the backend. ``auto`` = **llama.cpp**, the project's runtime: it needs no
+    daemon or GUI app to be running, sets up its own ~25 MB prebuilt binary on every OS, and
+    loads model files Ollama has already downloaded — so nothing large is fetched twice.
+    Ollama is chosen automatically only where llama.cpp cannot run (no prebuilt binary for
+    the CPU and none on PATH), or explicitly with ``TRIAGEFLOW_LLM_BACKEND=ollama``."""
     from ..core.config import settings
     from .llamacpp_backend import LlamaCppBackend
     from .ollama_backend import OllamaBackend
@@ -81,10 +83,7 @@ def get_backend(backend: str | None = None) -> LLMBackend:
     if name == "llamacpp":
         return LlamaCppBackend()
     llama = LlamaCppBackend()
-    if llama.runtime_installed():
+    if llama.runtime_installed() or llama.can_provision():
         return llama
     ollama = OllamaBackend()
-    if ollama.runtime_installed():
-        return ollama
-    # neither installed → llama.cpp (it can self-provision; Ollama's installer needs admin/GUI)
-    return llama
+    return ollama if ollama.runtime_installed() else llama

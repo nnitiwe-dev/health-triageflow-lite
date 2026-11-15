@@ -115,6 +115,21 @@ def _models_dir() -> Path:
     return Path.home() / ".ollama" / "models"
 
 
+def models_on_disk() -> list[str]:
+    """Model tags present in Ollama's local store, read from its manifests — works when the
+    Ollama server is NOT running. Without this, a stopped server looks like "no models" and
+    the UI would offer to re-download weights that are already on the machine."""
+    library = _models_dir() / "manifests" / "registry.ollama.ai" / "library"
+    found: list[str] = []
+    try:
+        for name_dir in sorted(p for p in library.iterdir() if p.is_dir()):
+            for tag in sorted(p for p in name_dir.iterdir() if p.is_file()):
+                found.append(f"{name_dir.name}:{tag.name}")
+    except OSError:
+        pass
+    return found
+
+
 def clear_partial_downloads(on_progress: Callable[[str], None] | None = None) -> int:
     """Delete partial/temporary blob files left by a failed or interrupted pull.
 

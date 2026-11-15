@@ -70,6 +70,7 @@ uv run triageflow doctor        # platform, model runtime, model, both MCP serve
 uv run triageflow pull-model    # download a model (resumable); add an id to choose one
 uv run triageflow demo          # one assessment in the terminal: tool calls, review, approval
 uv run python evals/run.py      # evaluation suite (add --llm to measure the model too)
+uv run python evals/runtime_smoke.py   # real check: fetch llama-server, start it, generate, stop
 uv run python -m pytest         # tests: SATS table, approval gate, runtime provisioning
 ```
 
@@ -89,10 +90,13 @@ The LLM runs behind an **OpenAI-compatible** interface, so the runtime is plugga
   cannot run on the machine. GGUF models come from Hugging Face on demand — standard **7B**,
   or a **3B** / tiny **0.5B** for low-end hardware — with resume + retry, a disk-space check
   and a file-integrity check. If port 8080 is taken, a free port is used.
-- **Ollama** — used automatically if it is already installed and llama.cpp is not (no
-  redundant setup). Install from [ollama.com](https://ollama.com/download).
-- **`auto` (default)** — llama.cpp if present → else an installed Ollama → else set up
-  llama.cpp. Force one with `TRIAGEFLOW_LLM_BACKEND=llamacpp` or `=ollama`.
+- **Ollama** — supported as an alternative (`TRIAGEFLOW_LLM_BACKEND=ollama`). It needs the
+  Ollama app/server running; the app starts it and, while it is coming up, still shows the
+  models Ollama has on disk as downloaded.
+- **`auto` (default)** — **llama.cpp**. It does not depend on another app being open, and it
+  loads model files Ollama has already downloaded, so nothing large is fetched twice. Ollama
+  is picked automatically only on a machine where llama.cpp cannot run (no prebuilt binary
+  for the CPU and none on PATH).
 - **Switch models from the UI** — the **model:** menu lists the catalog with download sizes;
   on a low-powered machine pick a smaller one and it downloads + switches with live progress.
   Same from the terminal: `uv run triageflow pull-model qwen2.5-3b-instruct-q4`.
@@ -258,7 +262,7 @@ carries fees in non-member countries — an eligibility risk) or real datasets l
 - **Data / validation:** Pydantic v2 · **FHIR R4** + **LOINC** · SQLite + JSONL (audit log)
 - **External API (optional):** FHIR R4 server — in-country EMR, or HAPI sandbox for a demo
 - **Triage scale:** South African Triage Scale (SATS) Adult / TEWS
-- **Tooling:** `uv` · pytest (330 tests) · eval harness (`evals/`) · ruff · GitHub Actions on 3 operating systems · Apache-2.0
+- **Tooling:** `uv` · pytest (340 tests) · eval harness (`evals/`) · ruff · GitHub Actions on 3 operating systems · Apache-2.0
 
 ## Limitations
 

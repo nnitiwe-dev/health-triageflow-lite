@@ -69,22 +69,96 @@ def test_both_backends_offer_tiers(tier_present, tmp_path, monkeypatch):
         assert any(o.tier == tier_present for o in b.catalog())
 
 
-def test_auto_prefers_installed_llamacpp(monkeypatch):
+def test_auto_is_llamacpp_when_both_are_installed(monkeypatch):
     monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: True)
     monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: True)
-    assert isinstance(get_backend("auto"), LlamaCppBackend)   # the project's primary runtime
+    assert isinstance(get_backend("auto"), LlamaCppBackend)   # the project's runtime
 
 
-def test_auto_reuses_an_installed_ollama_when_llamacpp_is_absent(monkeypatch):
+def test_auto_is_llamacpp_even_if_only_ollama_is_installed(monkeypatch):
+    """llama.cpp sets itself up and reuses Ollama's model files; it does not depend on the
+    Ollama app being open — the cause of 'model not found' when Ollama was not running."""
     monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: False)
+    monkeypatch.setattr(LlamaCppBackend, "can_provision", lambda self: True)
     monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: True)
-    assert isinstance(get_backend("auto"), OllamaBackend)      # no redundant setup
+    assert isinstance(get_backend("auto"), LlamaCppBackend)
+
+
+def test_auto_falls_back_to_ollama_only_where_llamacpp_cannot_run(monkeypatch):
+    monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: False)
+    monkeypatch.setattr(LlamaCppBackend, "can_provision", lambda self: False)
+    monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: True)
+    assert isinstance(get_backend("auto"), OllamaBackend)
 
 
 def test_auto_uses_llamacpp_when_neither_installed(monkeypatch):
     monkeypatch.setattr(OllamaBackend, "runtime_installed", lambda self: False)
     monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: False)
     assert isinstance(get_backend("auto"), LlamaCppBackend)  # it can self-provision
+
+
+# ---- Ollama: a stopped server must not look like "no models downloaded" ---------------------
+
+def _fake_ollama_store(root, tags):
+    for tag in tags:
+        name, _, version = tag.partition(":")
+        f = root / "manifests" / "registry.ollama.ai" / "library" / name / version
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{}", encoding="utf-8")
+
+
+def test_ollama_models_are_found_on_disk_when_its_server_is_down(tmp_path, monkeypatch):
+    from triageflow.agent import ollama_manager as om
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    _fake_ollama_store(tmp_path, ["qwen2.5:7b-instruct", "llama3.2:3b", "llama3.2:latest"])
+    monkeypatch.setattr(om, "server_up", lambda *a, **k: False)
+    monkeypatch.setattr(om, "list_models", lambda *a, **k: [])       # what a dead server gives
+    b = OllamaBackend()
+    assert om.models_on_disk() == ["llama3.2:3b", "llama3.2:latest", "qwen2.5:7b-instruct"]
+    assert b.is_installed("qwen2.5:7b-instruct") and not b.is_installed("qwen2.5:3b-instruct")
+    installed = {o.id: o.installed for o in b.catalog()}
+    assert installed == {"qwen2.5:7b-instruct": True, "qwen2.5:3b-instruct": False,
+                         "llama3.2:3b": True}
+    monkeypatch.setattr(b, "runtime_installed", lambda: True)
+    st = b.status()
+    assert st.model is None and "already downloaded" in st.hint
+
+
+def test_ollama_with_no_store_reports_nothing_installed(tmp_path, monkeypatch):
+    from triageflow.agent import ollama_manager as om
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path / "missing"))
+    monkeypatch.setattr(om, "server_up", lambda *a, **k: False)
+    assert om.models_on_disk() == []
+    assert not OllamaBackend().is_installed("qwen2.5:7b-instruct")
+
+
+def test_ollama_uses_the_server_list_when_it_is_running(tmp_path, monkeypatch):
+    from triageflow.agent import ollama_manager as om
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    _fake_ollama_store(tmp_path, ["qwen2.5:7b-instruct"])
+    monkeypatch.setattr(om, "server_up", lambda *a, **k: True)
+    monkeypatch.setattr(om, "list_models", lambda *a, **k: ["llama3.2:3b"])
+    assert OllamaBackend().installed_models() == ["llama3.2:3b"]
+
+
+def test_ollama_select_fails_cleanly_if_its_server_cannot_start(monkeypatch):
+    from triageflow.agent import ollama_manager as om
+    monkeypatch.setattr(om, "server_up", lambda *a, **k: False)
+    monkeypatch.setattr(om, "start_server", lambda *a, **k: False)
+    b, seen = OllamaBackend(), []
+    assert b.set_active_model("qwen2.5:7b-instruct") is False
+    assert b.pull_model("qwen2.5:7b-instruct", on_progress=seen.append) is False
+    assert "open the Ollama app" in seen[0]
+
+
+def test_llamacpp_does_not_adopt_a_foreign_server_on_its_port(tmp_path, monkeypatch):
+    """Something else answering /health on the port is not the model server."""
+    monkeypatch.setattr(settings, "home", tmp_path)
+    monkeypatch.setattr(settings, "models_dir", tmp_path / "models")
+    monkeypatch.setattr(LlamaCppBackend, "server_up", lambda self: True)
+    monkeypatch.setattr(LlamaCppBackend, "_is_llama_server", lambda self: False)
+    monkeypatch.setattr(LlamaCppBackend, "runtime_installed", lambda self: True)
+    assert LlamaCppBackend().ensure_server() is False       # no model of ours to start either
 
 
 def test_llamacpp_provisioned_bin_under_home(tmp_path, monkeypatch):
@@ -241,6 +315,30 @@ def test_runtime_that_does_not_run_is_rejected_and_removed(tmp_path, monkeypatch
     b = LlamaCppBackend()
     assert b.ensure_runtime() is False
     assert not b.runtime_installed() and "does not run on this machine" in b.last_error
+
+
+@posix_only
+def test_damaged_runtime_is_downloaded_again_before_starting(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "home", tmp_path)
+    monkeypatch.setattr(settings, "models_dir", tmp_path / "models")
+    monkeypatch.setattr("shutil.which", lambda _b: None)
+    monkeypatch.setattr(LlamaCppBackend, "_resolve_asset",
+                        lambda self: ("llama-b1-bin-ubuntu-x64.tar.gz", "https://x.invalid/a", 1))
+    calls = []
+
+    def fake_download(url, dest, **kw):
+        calls.append(1)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _fake_runtime_archive(dest)
+        return True
+    monkeypatch.setattr("triageflow.agent.llamacpp_backend.download_with_resume", fake_download)
+    b = LlamaCppBackend()
+    assert b.ensure_runtime() and len(calls) == 1
+    assert b._heal_runtime() is True and len(calls) == 1          # healthy: left alone
+    b._provisioned_bin().write_text("#!/bin/sh\nexit 127\n", encoding="utf-8")   # damage it
+    seen = []
+    assert b._heal_runtime(on_progress=seen.append) is True and len(calls) == 2
+    assert any("damaged" in m for m in seen) and b._runs(b._bin())[0]
 
 
 def test_failed_runtime_download_is_reported(tmp_path, monkeypatch):

@@ -376,3 +376,18 @@ def test_handover_note_prompt_leaves_out_the_actions_it_could_misreport():
         await a.narrate(st["run_id"])
         assert "Chest pain" in seen["facts"] and "ECG" not in seen["facts"]
     run(go())
+
+
+def test_switching_the_model_keeps_runs_that_are_waiting_at_the_gate():
+    """The model finishing its load (or the nurse switching model) must not orphan a patient
+    who was assessed a moment earlier."""
+    async def go():
+        a = agent()
+        st = await a.start(enc(complaint="chest pain"), nurse_confirmed_codes=["chest_pain"])
+        a.set_llm("some-model", "http://127.0.0.1:9/v1")       # model becomes available
+        assert a.llm_enabled and a.model == "some-model"
+        fin = await a.approve(st["run_id"], NURSE)             # still approvable
+        assert fin["approval"]["confirmed"]["confirmed_priority"] == "ORANGE"
+        a.set_llm(None, None)
+        assert not a.llm_enabled
+    run(go())

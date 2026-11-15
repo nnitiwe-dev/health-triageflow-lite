@@ -175,3 +175,18 @@ def test_synthetic_patient_and_queue_endpoints(client):
 
 def test_narrate_without_a_model_returns_no_note(client):
     assert client.post("/api/narrate", json={"run_id": "x"}).json() == {"note": None}
+
+
+def test_fractional_age_from_the_number_field_is_accepted(client):
+    events, _ = _assess(client, {"encounter_id": "WEB-5", "age_years": 54.0, "vitals": dict(H)})
+    assert not any(e["type"] == "error" for e in events)
+    assert events[-2]["state"]["summary"]["priority"] == "GREEN"
+
+
+def test_agent_is_repointed_in_place_when_the_model_changes(client):
+    before = webapp._state["agent"]
+    webapp._state["backend"] = type("B", (), {"chat_base_url": lambda self: "http://127.0.0.1:9/v1"})()
+    webapp._rebuild_agent("some-model")
+    assert webapp._state["agent"] is before and webapp._state["llm_enabled"] is True
+    webapp._rebuild_agent(None)
+    assert webapp._state["agent"] is before and webapp._state["llm_enabled"] is False

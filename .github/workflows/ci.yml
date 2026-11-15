@@ -18,10 +18,10 @@ jobs:
     env:
       PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
@@ -38,8 +38,9 @@ jobs:
       - name: Evaluation suite (scoring, flow, synthetic set, sign-finding)
         run: uv run python evals/run.py
 
-  # Real proof that the model runtime works on each OS: download the official llama.cpp
-  # binary through the app's own provisioning code and run it.
+  # Real proof that the model runtime works on each OS, with nothing mocked: the app's own
+  # code downloads the official llama.cpp binary, starts llama-server with a 1 MB test model,
+  # generates a few tokens and shuts it down.
   runtime:
     name: llama.cpp runtime · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -49,21 +50,10 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
       PYTHONUTF8: "1"
-      TRIAGEFLOW_LLM_BACKEND: llamacpp
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv python install 3.12
       - run: uv sync
-      - name: Provision and execute llama-server
-        shell: bash
-        run: |
-          export TRIAGEFLOW_HOME="$RUNNER_TEMP/triageflow"
-          uv run python - <<'PY'
-          import sys
-          from triageflow.agent.llamacpp_backend import LlamaCppBackend
-          b = LlamaCppBackend()
-          ok = b.ensure_runtime(on_progress=print)
-          print("binary:", b._bin(), "| error:", b.last_error or "none")
-          sys.exit(0 if ok and b.runtime_installed() else 1)
-          PY
+      - name: Provision llama-server, start it, generate, stop
+        run: uv run python evals/runtime_smoke.py

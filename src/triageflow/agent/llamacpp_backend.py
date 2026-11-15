@@ -291,11 +291,36 @@ class LlamaCppBackend:
             say(self.last_error)
             return False
 
+    def _heal_runtime(self, on_progress: Callable[[str], None] | None = None) -> bool:
+        """If the runtime WE unpacked no longer runs (files removed by a cleaner, antivirus
+        quarantine, an interrupted update), fetch it again instead of failing every start.
+        A llama-server the user installed on PATH is theirs — it is never replaced."""
+        binary = self._bin()
+        ours = self._provisioned_bin()
+        if not binary or not ours.is_file() or Path(binary) != ours:
+            return True
+        ok, why = self._runs(binary)
+        if ok:
+            return True
+        if on_progress:
+            on_progress(f"llama.cpp runtime is damaged ({why}) — downloading it again…")
+        shutil.rmtree(self._runtime_dir(), ignore_errors=True)
+        return self.ensure_runtime(on_progress)
+
     # --- server lifecycle -----------------------------------------------------
     def server_up(self) -> bool:
         try:
             r = httpx.get(self._base() + "/health", timeout=2.0, trust_env=False)
             return r.status_code == 200 and "status" in r.text
+        except Exception:
+            return False
+
+    def _is_llama_server(self) -> bool:
+        """A server we did not start is only adopted if it really speaks the model API — some
+        other program on the port with its own /health must not be mistaken for the model."""
+        try:
+            data = httpx.get(self._base() + "/v1/models", timeout=3.0, trust_env=False).json()
+            return isinstance(data.get("data"), list)
         except Exception:
             return False
 
@@ -335,15 +360,20 @@ class LlamaCppBackend:
 
     def ensure_server(self, wait_s: float = 0.0,
                       on_progress: Callable[[str], None] | None = None) -> bool:
-        if self.server_up():
+        ours = self._proc is not None and self._proc.poll() is None
+        if self.server_up() and (ours or self._is_llama_server()):
             if self._active is None:
                 self._active = self._served_model()
             return True
         if not self.runtime_installed() and not self.ensure_runtime(on_progress):
             return False
+        if not self._heal_runtime(on_progress):
+            return False
         model_id = self._pick_model()
         if not model_id:
             return False  # runtime ready, but no model downloaded yet (user picks one)
+        if on_progress:
+            on_progress(f"loading {_BY_ID[model_id].label} into memory…")
         return self._start_server_for(model_id, wait_s=max(wait_s, 180.0))
 
     def _command(self, binary: str, gguf: Path, model_id: str, minimal: bool) -> list[str]:
@@ -437,11 +467,12 @@ class LlamaCppBackend:
             self.last_error = "Model download failed — check the connection and try again."
             return False
         with open(dest, "rb") as f:        # an error page saved as .gguf must not be "installed"
-            if f.read(4) != b"GGUF":
-                dest.unlink(missing_ok=True)
-                self.last_error = "Downloaded file is not a valid GGUF model — try again."
-                say(self.last_error)
-                return False
+            magic = f.read(4)
+        if magic != b"GGUF":               # (unlink AFTER closing: Windows locks open files)
+            dest.unlink(missing_ok=True)
+            self.last_error = "Downloaded file is not a valid GGUF model — try again."
+            say(self.last_error)
+            return False
         return True
 
     def set_active_model(self, model_id: str) -> bool:

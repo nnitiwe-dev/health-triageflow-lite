@@ -36,10 +36,10 @@ def _normalize_ollama_host(raw: str) -> str:
 
 @dataclass
 class Settings:
-    # Which local open-weights runtime to use. "auto" (default) reuses what's already on the
-    # machine — llama.cpp if present, else an installed Ollama — and only if neither is there
-    # does it set up llama.cpp (a ~25 MB prebuilt download, any OS). Force one with "llamacpp"
-    # or "ollama". All keep data on the machine.
+    # Which local open-weights runtime to use. "auto" (default) = llama.cpp: it sets up its own
+    # ~25 MB prebuilt binary on any OS and reuses model files Ollama already downloaded. Ollama
+    # is used automatically only where llama.cpp cannot run; force it with "ollama". All keep
+    # data on the machine.
     llm_backend: str = field(default_factory=lambda: _env("TRIAGEFLOW_LLM_BACKEND", "auto").lower())
 
     # Open-weights model served locally (data never leaves the machine).

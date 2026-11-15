@@ -109,6 +109,14 @@ to reading/writing encounters against a real EMR — our data is already FHIR R4
    rejects an optional one, and stop the child process when the app exits.
 4. **Models**: reuse a GGUF Ollama already has; otherwise download with a disk-space check and
    a GGUF integrity check.
+5. **Self-heal**: if the runtime we unpacked stops running (files removed, quarantined), it is
+   fetched again before the next start. A server found on the port is adopted only if it
+   really answers the model API.
+
+`auto` selects llama.cpp for exactly this reason: it needs nothing else to be running. The
+Ollama backend remains available; when Ollama's server is down it reads Ollama's manifests
+from disk, so downloaded models are never reported as missing. CI runs
+`evals/runtime_smoke.py` on Linux, Windows and macOS — real binary, real server, real tokens.
 
 The web server never waits for any of this — it listens within a couple of seconds and the
 model switches on when ready.

@@ -87,6 +87,7 @@ async def _startup() -> None:
         mcp = InProcessMCP()
     _state["mcp"] = mcp
     _state["servers"] = list(mcp.connected_servers)
+    _state["agent"] = None
     _rebuild_agent(None)
     if isinstance(mcp, TriageMCP):
         _background(_attach_filesystem(mcp))
@@ -100,27 +101,50 @@ async def _attach_filesystem(mcp: TriageMCP) -> None:
 
 async def _bring_up_model() -> None:
     """Start the local runtime (self-provisioning the llama.cpp binary if needed), pick up a
-    ready model, and load it into memory before the first patient."""
+    ready model, and load it into memory before the first patient. Progress is published to
+    the status endpoint so the banner says what is happening instead of offering a download
+    for something that is merely still starting."""
     backend = _state["backend"]
+    _state["starting"] = True
+
+    def progress(msg: str) -> None:
+        _state["startup_msg"] = msg
     try:
-        await asyncio.to_thread(lambda: backend.ensure_server(wait_s=0))
+        await asyncio.to_thread(lambda: backend.ensure_server(wait_s=0, on_progress=progress))
         await asyncio.to_thread(_maybe_refresh_model)
-    except Exception:
+    except Exception as e:
+        _state["startup_msg"] = f"model start-up failed: {type(e).__name__}: {e}"
+    finally:
+        _state["starting"] = False
+    await _warm_up_once()
+
+
+async def _warm_up_once() -> None:
+    """Load the active model and prime its prompt cache — once per model."""
+    model = _state.get("model")
+    if not _state.get("llm_enabled") or not model or _state.get("warmed") == model \
+            or _state.get("warming"):
         return
-    if _state.get("llm_enabled"):
-        _state["warming"] = True
-        try:
-            await _agent().warm_up()
-        finally:
-            _state["warming"] = False
+    _state["warming"] = True
+    try:
+        await _agent().warm_up()
+        _state["warmed"] = model
+    finally:
+        _state["warming"] = False
 
 
 def _rebuild_agent(model: str | None) -> None:
+    """Point the agent at ``model`` (None = deterministic only). The agent is created once
+    and re-pointed in place, so assessments waiting at the approval gate survive a model
+    becoming ready or being switched."""
     # TRIAGEFLOW_NO_LLM=1 runs the agent deterministically (fast demos/evals, or LLM-off sites).
     agent_model = None if os.environ.get("TRIAGEFLOW_NO_LLM") else model
     base = _state["backend"].chat_base_url() if _state.get("backend") else None
-    _state["agent"] = TriageAgent(_state["mcp"], model=agent_model, chat_base_url=base,
-                                  extract_timeout=settings.extract_timeout_s)
+    if _state.get("agent") is None:
+        _state["agent"] = TriageAgent(_state["mcp"], model=agent_model, chat_base_url=base,
+                                      extract_timeout=settings.extract_timeout_s)
+    else:
+        _state["agent"].set_llm(agent_model, base)
     _state["llm_enabled"] = _state["agent"].llm_enabled
 
 
@@ -155,6 +179,8 @@ async def index(request: Request):
 @app.get("/api/status")
 async def status():
     await asyncio.to_thread(_maybe_refresh_model)
+    if not _state.get("starting"):       # a model that became ready later (e.g. Ollama) still
+        _background(_warm_up_once())     # gets loaded before the first patient needs it
     backend = _state.get("backend")
     bs = await asyncio.to_thread(backend.status) if backend else None
     return {
@@ -163,6 +189,10 @@ async def status():
         "model_ready": _state["model"] is not None,
         "llm_enabled": bool(_state.get("llm_enabled")),
         "warming": bool(_state.get("warming")),
+        "starting": bool(_state.get("starting")),
+        "startup_msg": _state.get("startup_msg", ""),
+        "server_up": bs.server_up if bs else False,
+        "backend_message": bs.message if bs else "",
         "handover_note": settings.handover_note,
         "llm_off_by_config": bool(os.environ.get("TRIAGEFLOW_NO_LLM")),
         "backend": backend.name if backend else None,
@@ -198,9 +228,11 @@ async def model_select(request: Request):
 
     def worker():
         try:
-            # ensure_server also self-provisions the runtime where possible (e.g. llama.cpp on
-            # Windows), streaming progress; if it still isn't available, surface the install hint.
-            backend.ensure_server(wait_s=0, on_progress=lambda s: q.put(s))
+            # Make the runtime available (llama.cpp fetches its own binary, streaming progress)
+            # WITHOUT loading the previous model first — the chosen one is started below.
+            ensure_runtime = getattr(backend, "ensure_runtime", None)
+            if ensure_runtime:
+                ensure_runtime(on_progress=lambda s: q.put(s))
             if not backend.runtime_installed():
                 q.put("__ERR__" + (backend.status().hint or "runtime not installed"))
                 q.put(None)
@@ -234,6 +266,7 @@ async def model_select(request: Request):
                     _state["model"] = data["model"]
                     _state["using_fallback"] = False
                     _rebuild_agent(data["model"])
+                    _background(_warm_up_once())
                 yield _sse({"type": "done", **data})
             elif item.startswith("__ERR__"):
                 yield _sse({"type": "error", "message": item[len("__ERR__"):]})
@@ -354,7 +387,10 @@ async def assess(request: Request):
     """Run the agent to the approval gate, streaming each tool call as it happens (SSE).
     The deterministic proposal is sent as soon as it is scored — before any model call."""
     body = await request.json()
-    encounter = body.get("encounter", {})
+    encounter = dict(body.get("encounter") or {})
+    age = encounter.get("age_years")
+    if isinstance(age, float) and age == age:      # a number field may send 54.0 or 54.5
+        encounter["age_years"] = int(age)
 
     async def gen():
         try:

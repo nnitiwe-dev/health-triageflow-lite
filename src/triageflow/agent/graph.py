@@ -165,16 +165,25 @@ class TriageAgent:
         self.extract_timeout = extract_timeout
         self._llm = None
         self._runs: deque[str] = deque(maxlen=300)
-        # Backend-agnostic: talk to whatever OpenAI-compatible server (llama.cpp / Ollama /
-        # vLLM) the chosen backend exposes. model=None => deterministic-only (no LLM calls).
+        self._temperature = temperature
+        self.set_llm(model, chat_base_url)
+        self.graph = self._build()
+
+    def set_llm(self, model: str | None, chat_base_url: str | None) -> None:
+        """Point the agent at a model (or at none). Done IN PLACE so that assessments already
+        waiting at the approval gate stay approvable when the model finishes loading or the
+        nurse switches model — rebuilding the agent would orphan them.
+
+        Backend-agnostic: any OpenAI-compatible server (llama.cpp / Ollama / vLLM).
+        model=None => deterministic-only (no LLM calls)."""
+        self.model, self._llm = model, None
         if model and chat_base_url:
             try:
                 from .llm_backend import make_chat_model
-                self._llm = make_chat_model(chat_base_url, model, temperature=temperature,
+                self._llm = make_chat_model(chat_base_url, model, temperature=self._temperature,
                                             max_tokens=120)
             except Exception:
                 self._llm = None
-        self.graph = self._build()
 
     @property
     def llm_enabled(self) -> bool:
