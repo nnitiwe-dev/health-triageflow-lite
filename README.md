@@ -262,7 +262,7 @@ carries fees in non-member countries — an eligibility risk) or real datasets l
 - **Data / validation:** Pydantic v2 · **FHIR R4** + **LOINC** · SQLite + JSONL (audit log)
 - **External API (optional):** FHIR R4 server — in-country EMR, or HAPI sandbox for a demo
 - **Triage scale:** South African Triage Scale (SATS) Adult / TEWS
-- **Tooling:** `uv` · pytest (340 tests) · eval harness (`evals/`) · ruff · GitHub Actions on 3 operating systems · Apache-2.0
+- **Tooling:** `uv` · pytest (344 tests) · eval harness (`evals/`) · ruff · GitHub Actions on 3 operating systems · Apache-2.0
 
 ## Limitations
 

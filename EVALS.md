@@ -6,7 +6,7 @@ Run it yourself:
 uv run python evals/run.py          # scoring, approval gate, synthetic set, keyword recall
 uv run python evals/run.py --llm    # the same, plus sign-finding with the local model
 uv run python evals/runtime_smoke.py   # llama.cpp for real: provision, start, generate, stop
-uv run python -m pytest -q          # 340 tests
+uv run python -m pytest -q          # 344 tests
 ```
 
 The set probes behaviour honestly — under-triage, missing and impossible data, the approval

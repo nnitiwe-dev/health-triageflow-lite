@@ -85,7 +85,10 @@ class TriageMCP:
         """Connect our own server; then the borrowed one (awaited unless told otherwise —
         pass ``wait_for_filesystem=False`` and schedule ``connect_filesystem()`` yourself)."""
         own = MultiServerMCPClient({"triageflow": _connections()["triageflow"]})
-        tools = await own.get_tools()
+        # server_name= loads in THIS task. (Without it the adapter spawns a child task per
+        # server; if we are cancelled — Ctrl+C while still connecting — that child is orphaned
+        # and its error is dumped as "unhandled exception during asyncio.run() shutdown".)
+        tools = await own.get_tools(server_name="triageflow")
         self._tools = {t.name: t for t in tools}
         self.connected_servers = ["triageflow"]
         if self.include_filesystem and wait_for_filesystem:
@@ -101,8 +104,9 @@ class TriageMCP:
             return False
         try:
             fs = MultiServerMCPClient({"filesystem": _connections()["filesystem"]})
-            tools = await asyncio.wait_for(fs.get_tools(), timeout=self.filesystem_timeout)
-        except Exception:
+            tools = await asyncio.wait_for(fs.get_tools(server_name="filesystem"),
+                                           timeout=self.filesystem_timeout)
+        except Exception:      # includes the adapter's own error when interrupted mid-connect
             return False
         self._tools.update({t.name: t for t in tools})
         self.connected_servers.append("filesystem")

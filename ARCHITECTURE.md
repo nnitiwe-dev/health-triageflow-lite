@@ -112,6 +112,10 @@ to reading/writing encounters against a real EMR — our data is already FHIR R4
 5. **Self-heal**: if the runtime we unpacked stops running (files removed, quarantined), it is
    fetched again before the next start. A server found on the port is adopted only if it
    really answers the model API.
+6. **Clean exit**: Ctrl+C, a closed terminal window (SIGHUP) or SIGTERM all stop the model
+   server — even mid-load. If the app is killed outright, the next start finds the server it
+   left behind (by pid file, on whatever port it used), reuses it, and stops it on exit; a
+   stale pid that now belongs to another program is never touched.
 
 `auto` selects llama.cpp for exactly this reason: it needs nothing else to be running. The
 Ollama backend remains available; when Ollama's server is down it reads Ollama's manifests

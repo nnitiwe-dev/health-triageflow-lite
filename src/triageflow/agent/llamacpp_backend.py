@@ -23,6 +23,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import tarfile
@@ -98,6 +99,11 @@ def _port_in_use(host: str, port: int) -> bool:
     """True if we could not bind the port ourselves. (Probing with connect() is unreliable:
     a busy listener with a full backlog looks 'free' and llama-server then fails to bind.)"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if platform.system() != "Windows":
+            # A server that has just exited leaves the port in TIME_WAIT for a while; without
+            # this the port would look taken and we would drift to a random one. (Not on
+            # Windows, where the same option means "steal a port someone is listening on".)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind((host, port))
             return False
@@ -113,9 +119,11 @@ class LlamaCppBackend:
         self._log = None
         self._active: str | None = None
         self._port: int = settings.llamacpp_port
+        self._adopted_pid: int | None = None   # a server WE started in an earlier, killed run
+        self._closing = False
         self.last_error: str = ""
         settings.models_dir.mkdir(parents=True, exist_ok=True)
-        atexit.register(self._stop)   # never leave an orphaned llama-server holding RAM
+        atexit.register(self.close)   # never leave an orphaned llama-server holding RAM
 
     # --- URLs / paths ---------------------------------------------------------
     def _base(self) -> str:
@@ -361,7 +369,9 @@ class LlamaCppBackend:
     def ensure_server(self, wait_s: float = 0.0,
                       on_progress: Callable[[str], None] | None = None) -> bool:
         ours = self._proc is not None and self._proc.poll() is None
-        if self.server_up() and (ours or self._is_llama_server()):
+        if not ours and self._adopted_pid is None:
+            self._recover_previous_server()
+        if self.server_up() and (ours or self._adopted_pid or self._is_llama_server()):
             if self._active is None:
                 self._active = self._served_model()
             return True
@@ -397,6 +407,8 @@ class LlamaCppBackend:
         log_path = settings.home / "logs" / "llama-server.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         for minimal in (False, True):
+            if self._closing:                     # the app is shutting down: do not (re)start
+                return False
             if minimal and _port_in_use(settings.llamacpp_host, self._port):
                 self._port = _free_port()         # lost a race for the port: take another
             self._log = open(log_path, "ab")      # kept for diagnosis (`triageflow doctor`)
@@ -405,11 +417,16 @@ class LlamaCppBackend:
                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **_no_window())
             deadline = time.time() + wait_s
             while time.time() < deadline:
-                if self._proc.poll() is not None:      # died: retry once with minimal flags
+                if self._closing:                      # shut down while the model was loading
+                    self._stop()
+                    return False
+                proc = self._proc
+                if proc is None or proc.poll() is not None:   # died: retry with minimal flags
                     break
                 if self.server_up():
                     self._active = model_id
                     self.last_error = ""
+                    self._write_pidfile(self._proc.pid)
                     return True
                 time.sleep(0.5)
             else:
@@ -429,14 +446,67 @@ class LlamaCppBackend:
                 pass
             self._log = None
 
+    def close(self) -> None:
+        """Final shutdown: stop the server and make sure a load still in progress on another
+        thread gives up instead of retrying (which would hold the process open on Ctrl+C)."""
+        self._closing = True
+        self._stop()
+
+    def _pidfile(self) -> Path:
+        return settings.home / "run" / "llama-server.pid"
+
+    def _write_pidfile(self, pid: int) -> None:
+        try:
+            self._pidfile().parent.mkdir(parents=True, exist_ok=True)
+            self._pidfile().write_text(f"{pid} {self._port}", encoding="utf-8")
+        except OSError:
+            pass
+
+    def _read_pidfile(self) -> tuple[int, int] | None:
+        """(pid, port) of the llama-server this app last started, if recorded."""
+        try:
+            pid, port = self._pidfile().read_text(encoding="utf-8").split()
+            return int(pid), int(port)
+        except (OSError, ValueError):
+            return None
+
+    def _recover_previous_server(self) -> None:
+        """If the app was killed last time (terminal closed, crash, power button) the
+        llama-server it started is still running and holding gigabytes of RAM. Find it by
+        our pid file — on whatever port it was using — and take ownership again: reuse it if
+        it answers, otherwise stop it. Either way it no longer outlives the app."""
+        rec = self._read_pidfile()
+        if rec is None:
+            return
+        pid, port = rec
+        if not _pid_is_llama_server(pid):          # gone (or the pid now belongs to
+            self._pidfile().unlink(missing_ok=True)   # something else): nothing to recover
+            return
+        self._port = port
+        if self.server_up() and self._is_llama_server():
+            self._adopted_pid = pid
+            return
+        _terminate_pid(pid)                        # ours, but hung or half-loaded: clear it
+        self._pidfile().unlink(missing_ok=True)
+        self._port = settings.llamacpp_port
+
     def _stop(self) -> None:
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
-            try:
-                self._proc.wait(timeout=10)
+            try:                                # a server busy generating can ignore a polite
+                self._proc.wait(timeout=4)      # stop for a long time — don't hang the exit
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+                try:
+                    self._proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        elif self._adopted_pid:                 # ours from a previous run: stop it too
+            _terminate_pid(self._adopted_pid)
+        if self._proc or self._adopted_pid:
+            self._pidfile().unlink(missing_ok=True)
         self._proc = None
+        self._adopted_pid = None
         self._close_log()
 
     # --- models ---------------------------------------------------------------
@@ -511,6 +581,42 @@ class LlamaCppBackend:
         return BackendStatus(
             backend="llamacpp", runtime_installed=installed, server_up=up, model=model,
             using_fallback=fb, catalog=self.catalog(), message=msg, hint=hint)
+
+
+def _pid_is_llama_server(pid: int) -> bool:
+    """True only if ``pid`` is alive AND is a llama-server — a recorded pid may have been
+    reused by an unrelated program since, and that must never be touched."""
+    try:
+        if platform.system() == "Windows":
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=10, **_no_window()).stdout
+        else:
+            out = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                                 capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return False
+    return "llama-server" in out
+
+
+def _terminate_pid(pid: int, grace_s: float = 4.0) -> None:
+    """Stop a llama-server we do not hold a handle to: ask, wait briefly, then force."""
+    if not _pid_is_llama_server(pid):
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)            # on Windows this terminates immediately
+    except OSError:
+        return
+    if platform.system() == "Windows":
+        return
+    deadline = time.time() + grace_s
+    while time.time() < deadline:
+        if not _pid_is_llama_server(pid):
+            return
+        time.sleep(0.25)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
 
 
 def _no_window() -> dict:

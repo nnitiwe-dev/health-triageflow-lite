@@ -47,11 +47,19 @@ async def _lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        for task in list(_tasks):
+        # Quiet, prompt shutdown (Ctrl+C can arrive while things are still starting):
+        # tell the backend first so a model load in progress stops instead of retrying, then
+        # cancel the background tasks and WAIT for them so nothing is left half-cancelled.
+        backend = _state.get("backend")
+        close = getattr(backend, "close", None) or getattr(backend, "_stop", None)
+        if close:                     # don't leave llama-server holding RAM after exit
+            await asyncio.to_thread(close)
+        pending = list(_tasks)
+        for task in pending:
             task.cancel()
-        stop = getattr(_state.get("backend"), "_stop", None)
-        if stop:                      # don't leave llama-server holding RAM after exit
-            await asyncio.to_thread(stop)
+        if pending:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), 10)
 
 
 app = FastAPI(title="TriageFlow Lite", lifespan=_lifespan)

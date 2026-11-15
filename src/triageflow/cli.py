@@ -170,7 +170,14 @@ def _demo() -> int:
 
 
 def _serve(host: str, port: int) -> int:
+    import os
+    import signal
+
     import uvicorn
+    # Closing the terminal window sends SIGHUP, which by default kills Python with no clean-up
+    # — leaving llama-server running. Treat it as a normal stop request instead.
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, lambda *_: os.kill(os.getpid(), signal.SIGTERM))
     print(f"TriageFlow Lite → http://{host}:{port}")
     uvicorn.run("triageflow.web.app:app", host=host, port=port, log_level="info")
     return 0

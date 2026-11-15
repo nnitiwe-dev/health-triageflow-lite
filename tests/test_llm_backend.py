@@ -499,6 +499,83 @@ def test_server_retries_with_minimal_flags_if_the_binary_rejects_the_optional_on
         b._stop()
 
 
+@posix_only
+def test_server_left_by_a_killed_run_is_adopted_and_stopped(tmp_path, monkeypatch):
+    """Kill the app without clean-up; the next run must take its llama-server back and stop
+    it on exit — not leave it holding memory for ever."""
+    first = _install_fake_server(tmp_path, monkeypatch)
+    assert first.ensure_server() is True
+    orphan = first._proc
+    first._proc = None                              # simulate the app dying: no _stop()
+    try:
+        second = LlamaCppBackend()                  # the next launch of the app
+        assert second.ensure_server() is True       # finds the running server…
+        assert second._adopted_pid == orphan.pid    # …and knows it is ours
+        assert second.resolve_model()[0] == "qwen2.5-3b-instruct-q4"
+        second.close()
+        orphan.wait(timeout=10)                     # it was really terminated
+        assert not second.server_up() and not second._pidfile().exists()
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+
+
+@posix_only
+def test_server_left_on_another_port_is_still_found(tmp_path, monkeypatch):
+    """The previous run had moved to a free port; the relaunch must look THERE, not start a
+    second server next to it."""
+    import socket
+    first = _install_fake_server(tmp_path, monkeypatch)
+    with socket.socket() as squatter:
+        squatter.bind(("127.0.0.1", settings.llamacpp_port))
+        squatter.listen(1)
+        assert first.ensure_server() is True and first._port != settings.llamacpp_port
+    orphan, port = first._proc, first._port
+    first._proc = None
+    try:
+        second = LlamaCppBackend()
+        assert second.ensure_server() is True
+        assert second._adopted_pid == orphan.pid and second._port == port
+        assert second._proc is None                 # no second server was started
+        second.close()
+        orphan.wait(timeout=10)
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+
+
+def test_stale_pid_file_never_touches_an_unrelated_process(tmp_path, monkeypatch):
+    """A recorded pid that now belongs to something else (here: this test process) is ignored
+    and the stale file removed."""
+    import os as _os
+
+    from triageflow.agent.llamacpp_backend import _terminate_pid
+    monkeypatch.setattr(settings, "home", tmp_path)
+    monkeypatch.setattr(settings, "models_dir", tmp_path / "models")
+    b = LlamaCppBackend()
+    b._write_pidfile(_os.getpid())
+    b._recover_previous_server()
+    assert b._adopted_pid is None and not b._pidfile().exists()
+    _terminate_pid(_os.getpid())                    # must be a no-op: we are still here
+
+
+@posix_only
+def test_close_during_model_load_stops_instead_of_retrying(tmp_path, monkeypatch):
+    import threading
+    b = _install_fake_server(tmp_path, monkeypatch)
+    monkeypatch.setattr(LlamaCppBackend, "server_up", lambda self: False)   # "still loading"
+    result = {}
+    t = threading.Thread(target=lambda: result.update(ok=b.ensure_server()))
+    t.start()
+    for _ in range(100):                            # wait until the server process exists
+        if b._proc is not None:
+            break
+        __import__("time").sleep(0.05)
+    b.close()                                       # Ctrl+C while the model is loading
+    t.join(timeout=15)
+    assert not t.is_alive() and result == {"ok": False} and b._proc is None
+
+
 def test_server_start_without_a_model_is_a_clean_no(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "home", tmp_path)
     monkeypatch.setattr(settings, "models_dir", tmp_path / "models")
