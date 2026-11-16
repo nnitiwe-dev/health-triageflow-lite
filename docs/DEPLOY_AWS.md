@@ -129,19 +129,30 @@ this one service). Save as `deploy-policy.json`, filling in your account id and 
       "Action": ["ecr:BatchCheckLayerAvailability","ecr:GetDownloadUrlForLayer","ecr:BatchGetImage",
                  "ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:PutImage"],
       "Resource": "arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/health-triageflow-lite" },
-    { "Sid": "AppRunnerDeploy", "Effect": "Allow",
-      "Action": ["apprunner:StartDeployment","apprunner:DescribeService"],
+    { "Sid": "AppRunnerManage", "Effect": "Allow",
+      "Action": ["apprunner:CreateService","apprunner:StartDeployment","apprunner:DescribeService","apprunner:TagResource"],
       "Resource": "arn:aws:apprunner:us-east-1:ACCOUNT_ID:service/health-triageflow-lite/*" },
-    { "Sid": "AppRunnerFind", "Effect": "Allow", "Action": "apprunner:ListServices", "Resource": "*" }
+    { "Sid": "AppRunnerFind", "Effect": "Allow", "Action": "apprunner:ListServices", "Resource": "*" },
+    { "Sid": "PassEcrAccessRole", "Effect": "Allow", "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::ACCOUNT_ID:role/AppRunnerECRAccessRole",
+      "Condition": { "StringEquals": { "iam:PassedToService": "build.apprunner.amazonaws.com" } } },
+    { "Sid": "AppRunnerServiceLinkedRole", "Effect": "Allow", "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "arn:aws:iam::ACCOUNT_ID:role/aws-service-role/apprunner.amazonaws.com/*",
+      "Condition": { "StringEquals": { "iam:AWSServiceName": "apprunner.amazonaws.com" } } }
   ]
 }
 ```
 
-> `apprunner:ListServices` lets CI find the service by name, so you **don't** have to set the
-> `APPRUNNER_SERVICE_ARN` secret — once the service exists, the next push deploys to it. If you
-> prefer not to grant it, leave it out and set `APPRUNNER_SERVICE_ARN` instead (either works).
-> Note it is **read-only and account-wide** (`ListServices` has no resource-level scoping);
-> everything else stays scoped to this one repo/service.
+> This is the **full-automation** policy: CI builds, and **creates the service if it's missing**,
+> then deploys — no manual steps and no `APPRUNNER_SERVICE_ARN` secret. The extra permissions are
+> scoped as tightly as AWS allows:
+> - `CreateService`/`StartDeployment`/`DescribeService` only on `service/health-triageflow-lite/*`;
+> - `iam:PassRole` only for the `AppRunnerECRAccessRole`, and only when passed **to App Runner**;
+> - `iam:CreateServiceLinkedRole` only for App Runner's own service-linked role.
+> `ListServices` is read-only but account-wide (it has no resource scoping). The CI user still
+> cannot touch any other service, repo, or role. If you'd rather keep CI minimal and create the
+> service yourself, drop `CreateService`, `PassRole` and `CreateServiceLinkedRole` and use the
+> one-time CLI below instead.
 
 Attach it to the IAM user whose access key you will give GitHub (create a dedicated user such
 as `triageflow-ci` — not your personal admin user):
@@ -257,7 +268,8 @@ aws apprunner list-services --region "$AWS_REGION" \
 Prepend `https://` to `ServiceUrl` to open it. After this exists, CI auto-deploys to it on
 every push (via `apprunner:ListServices`, or set `APPRUNNER_SERVICE_ARN`).
 
-> **Why CI doesn't create the service itself.** It would need `apprunner:CreateService` and
-> `iam:PassRole` on the access role — handing a build pipeline the power to create services and
-> pass IAM roles, permanently, for a one-time action. That is a worse security trade than
-> running the three commands above once. CI instead *detects* the service and deploys to it.
+> **The one thing CI still can't do: create the ECR-access role.** Automating that would need
+> `iam:CreateRole` on the CI user, which is effectively admin — so step 1 above (creating
+> `AppRunnerECRAccessRole`) is a one-time command you run as your console identity. After that,
+> with the full-automation policy, CI creates the service on the first push and deploys on every
+> push, with no further manual steps.
