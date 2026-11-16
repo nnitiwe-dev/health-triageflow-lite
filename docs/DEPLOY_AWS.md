@@ -109,6 +109,15 @@ aws iam attach-role-policy --role-name ecsInfrastructureRoleForExpressServices \
 > IAM roles are eventually consistent — if the very first deploy fails with "Unable to assume
 > the … role" seconds after you create these, wait a minute and re-run it.
 
+**Make sure the region has a default VPC.** Express Mode puts its load balancer in your account's
+default VPC and public subnets. Many new accounts don't have one (it was never created, or was
+deleted), and the deploy then fails with *"No default VPC or subnets found in the region."* Create
+one (free, idempotent — errors harmlessly if it already exists):
+
+```bash
+aws ec2 create-default-vpc --region $AWS_REGION
+```
+
 That is all the hand-setup there is: **you do not create the service by hand.** CI's deploy
 action creates it on the first push to `main` and updates it afterwards.
 
