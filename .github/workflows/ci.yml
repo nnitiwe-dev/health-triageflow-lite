@@ -69,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      SERVICE_ARN: ${{ secrets.APPRUNNER_SERVICE_ARN }}
     steps:
       - uses: actions/checkout@v7
 
@@ -101,9 +103,15 @@ jobs:
           cache-to: type=inline
 
       - name: Trigger App Runner deployment
+        if: env.SERVICE_ARN != ''
         run: |
-          aws apprunner start-deployment \
-            --service-arn "${{ secrets.APPRUNNER_SERVICE_ARN }}" \
-            --query 'OperationId' --output text
-          echo "App Runner is rolling out the new image. Watch it in the AWS console or with:"
-          echo "  aws apprunner describe-service --service-arn <ARN> --query 'Service.Status'"
+          aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query 'OperationId' --output text
+          echo "App Runner is rolling out the new image. Watch it in the console or with:"
+          echo "  aws apprunner describe-service --service-arn \$SERVICE_ARN --query 'Service.Status'"
+
+      - name: First image pushed (App Runner service not created yet)
+        if: env.SERVICE_ARN == ''
+        run: |
+          echo "Image pushed to ECR as :latest. Create the App Runner service from it (see"
+          echo "docs/DEPLOY_AWS.md Phase B), then add the APPRUNNER_SERVICE_ARN secret — the"
+          echo "next push to main will deploy automatically."

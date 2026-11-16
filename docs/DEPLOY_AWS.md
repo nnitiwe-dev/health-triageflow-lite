@@ -26,6 +26,20 @@ deploy workflow.
 
 ## Before you begin
 
+> **Run the one-time setup (Phases A–B) as your normal console identity**, which already has
+> admin rights — in AWS CloudShell that is automatic. The `triageflow-ci` user you created is
+> deliberately minimal (push images + deploy only); it **cannot** create the repository or the
+> service. If you ran `aws configure` with the CI user's keys in CloudShell, revert to your
+> console identity first:
+>
+> ```bash
+> rm -f ~/.aws/credentials        # drop the CI user's static keys
+> aws sts get-caller-identity     # should now show your own user/role, not triageflow-ci
+> ```
+>
+> The CI user's keys belong in **GitHub secrets**, not in CloudShell.
+
+
 Install and sign in:
 
 ```bash
@@ -45,33 +59,27 @@ export ECR_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
 
 ---
 
-## Phase A — Create the image registry and push the first image
+## Phase A — Create the image registry
 
-App Runner deploys *from* an image, so it needs one to exist first.
-
-**1. Create the ECR repository:**
+App Runner deploys *from* an image, so a registry must exist. This is the only AWS resource
+you create by hand; **CI builds and pushes the image itself** (a 5+ GB model image won't build
+in CloudShell, and you shouldn't have to build it locally).
 
 ```bash
 aws ecr create-repository --repository-name $ECR_REPO --region $AWS_REGION
 ```
 
-**2. Build and push the first image** (this downloads the ~4.7 GB model once, so it takes a
-while and needs ~15 GB free disk):
+Now wire up GitHub so the first push builds the image **(do Phase C's secrets/variables now,
+but leave `APPRUNNER_SERVICE_ARN` unset)**, then push to `main`. The `deploy` job builds the
+image, pushes it to ECR as `:latest`, and — because no service exists yet — prints a note and
+stops without deploying. You now have an image to create the service from.
 
-```bash
-aws ecr get-login-password --region $AWS_REGION \
-  | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-
-docker build --platform linux/amd64 -t $ECR_URI:latest .
-docker push $ECR_URI:latest
-```
-
-> After CI/CD is set up (Phase C), you never run this by hand again — GitHub Actions does it.
-> To test cheaply first, build the tiny model instead:
+> Prefer to build the very first image yourself instead? With Docker and ~15 GB free disk:
+> `docker build --platform linux/amd64 -t $ECR_URI:latest . && docker push $ECR_URI:latest`
+> (after `aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com`).
+> To test the container cheaply first, build the tiny model:
 > `docker build --platform linux/amd64 --build-arg MODEL_REPO=bartowski/Qwen2.5-0.5B-Instruct-GGUF --build-arg MODEL_FILE=Qwen2.5-0.5B-Instruct-Q4_K_M.gguf --build-arg MODEL_ID=qwen2.5-0.5b-instruct-q4 -t test .`
 > then `docker run -p 8000:8000 test` and open <http://127.0.0.1:8000>.
-
----
 
 ## Phase B — Create the App Runner service
 
@@ -154,8 +162,12 @@ until `DEPLOY_TO_AWS` is `true`, so adding the Docker files changed nothing and 
 until this step. The job also runs **only on `main`** and **only after** every test and
 runtime job passes.
 
-**3. Deploy** by pushing to `main` (or re-running the latest `main` workflow). The job builds
-the image, pushes it to ECR reusing the unchanged model layer, and calls
+You will set these in two passes: **before Phase A's first push**, add everything *except*
+`APPRUNNER_SERVICE_ARN` (so CI can build the first image); **after Phase B** creates the
+service, add `APPRUNNER_SERVICE_ARN` too.
+
+**3. Deploy** by pushing to `main` (or re-running the latest `main` workflow). With the ARN
+set, the job builds the image, pushes it to ECR reusing the unchanged model layer, and calls
 `apprunner start-deployment`. App Runner rolls out the new image with no downtime.
 
 ---
