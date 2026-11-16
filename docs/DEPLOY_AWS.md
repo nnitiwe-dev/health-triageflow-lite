@@ -131,10 +131,17 @@ this one service). Save as `deploy-policy.json`, filling in your account id and 
       "Resource": "arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/health-triageflow-lite" },
     { "Sid": "AppRunnerDeploy", "Effect": "Allow",
       "Action": ["apprunner:StartDeployment","apprunner:DescribeService"],
-      "Resource": "arn:aws:apprunner:us-east-1:ACCOUNT_ID:service/health-triageflow-lite/*" }
+      "Resource": "arn:aws:apprunner:us-east-1:ACCOUNT_ID:service/health-triageflow-lite/*" },
+    { "Sid": "AppRunnerFind", "Effect": "Allow", "Action": "apprunner:ListServices", "Resource": "*" }
   ]
 }
 ```
+
+> `apprunner:ListServices` lets CI find the service by name, so you **don't** have to set the
+> `APPRUNNER_SERVICE_ARN` secret — once the service exists, the next push deploys to it. If you
+> prefer not to grant it, leave it out and set `APPRUNNER_SERVICE_ARN` instead (either works).
+> Note it is **read-only and account-wide** (`ListServices` has no resource-level scoping);
+> everything else stays scoped to this one repo/service.
 
 Attach it to the IAM user whose access key you will give GitHub (create a dedicated user such
 as `triageflow-ci` — not your personal admin user):
@@ -200,11 +207,33 @@ suggestions are off.
 - **`docker build` fails downloading the model** — a Hugging Face hiccup; re-run. The URL and
   filename are pinned in the Dockerfile.
 
-### CLI alternative to Phase B
+### Create the service entirely from the CLI
+
+Run these **as your console identity** (they create an IAM role and an App Runner service — the
+least-privilege `triageflow-ci` user cannot, by design). Variables from "Before you begin"
+(`$ACCOUNT_ID`, `$AWS_REGION`, `$ECR_URI`) must be set.
+
+**1. The ECR-access role App Runner uses to pull the image** (one-time; skip if it exists):
+
+```bash
+cat > /tmp/apprunner-trust.json <<'JSON'
+{ "Version": "2012-10-17",
+  "Statement": [ { "Effect": "Allow",
+    "Principal": { "Service": "build.apprunner.amazonaws.com" },
+    "Action": "sts:AssumeRole" } ] }
+JSON
+
+aws iam create-role --role-name AppRunnerECRAccessRole \
+  --assume-role-policy-document file:///tmp/apprunner-trust.json
+aws iam attach-role-policy --role-name AppRunnerECRAccessRole \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+```
+
+**2. Create the service** from the image CI already pushed:
 
 ```bash
 aws apprunner create-service \
-  --service-name health-triageflow-lite \
+  --service-name health-triageflow-lite --region "$AWS_REGION" \
   --source-configuration '{
     "ImageRepository": {
       "ImageIdentifier": "'"$ECR_URI"':latest",
@@ -212,12 +241,23 @@ aws apprunner create-service \
       "ImageConfiguration": { "Port": "8000" }
     },
     "AutoDeploymentsEnabled": false,
-    "AuthenticationConfiguration": { "AccessRoleArn": "arn:aws:iam::'"$ACCOUNT_ID"':role/service-role/AppRunnerECRAccessRole" }
+    "AuthenticationConfiguration": { "AccessRoleArn": "arn:aws:iam::'"$ACCOUNT_ID"':role/AppRunnerECRAccessRole" }
   }' \
   --instance-configuration '{ "Cpu": "4 vCPU", "Memory": "12 GB" }' \
-  --health-check-configuration '{ "Protocol": "HTTP", "Path": "/api/status", "Interval": 20, "Timeout": 5, "HealthyThreshold": 1, "UnhealthyThreshold": 5 }' \
-  --region $AWS_REGION
+  --health-check-configuration '{ "Protocol": "HTTP", "Path": "/api/status", "Interval": 20, "Timeout": 5, "HealthyThreshold": 1, "UnhealthyThreshold": 5 }'
 ```
 
-(Create `AppRunnerECRAccessRole` once via the console's "Create service" flow, or with an IAM
-role that trusts `build.apprunner.amazonaws.com` and has `AWSAppRunnerServicePolicyForECRAccess`.)
+**3. Get the public URL** (and confirm it is running):
+
+```bash
+aws apprunner list-services --region "$AWS_REGION" \
+  --query "ServiceSummaryList[?ServiceName=='health-triageflow-lite'].[Status,ServiceUrl]" --output table
+```
+
+Prepend `https://` to `ServiceUrl` to open it. After this exists, CI auto-deploys to it on
+every push (via `apprunner:ListServices`, or set `APPRUNNER_SERVICE_ARN`).
+
+> **Why CI doesn't create the service itself.** It would need `apprunner:CreateService` and
+> `iam:PassRole` on the access role — handing a build pipeline the power to create services and
+> pass IAM roles, permanently, for a one-time action. That is a worse security trade than
+> running the three commands above once. CI instead *detects* the service and deploys to it.

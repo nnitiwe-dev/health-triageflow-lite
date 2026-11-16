@@ -85,6 +85,23 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Does the App Runner service exist yet?
+        id: svc
+        env:
+          REGION: ${{ vars.AWS_REGION }}
+          NAME: ${{ vars.ECR_REPOSITORY }}
+        run: |
+          set -uo pipefail
+          ARN="$SERVICE_ARN"                          # explicit secret wins, if set
+          if [ -z "$ARN" ]; then                      # else look it up by name (needs
+            ARN=$(aws apprunner list-services --region "$REGION" \
+                  --query "ServiceSummaryList[?ServiceName=='$NAME'].ServiceArn | [0]" \
+                  --output text 2>/dev/null || true)  # apprunner:ListServices; tolerated if denied
+          fi
+          [ "$ARN" = "None" ] && ARN=""
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+          [ -n "$ARN" ] && echo "service exists: $ARN" || echo "service does not exist yet"
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build and push image
@@ -104,7 +121,9 @@ jobs:
 
       - name: Deploy to App Runner and wait for the rollout
         id: deploy
-        if: env.SERVICE_ARN != ''
+        if: steps.svc.outputs.arn != ''
+        env:
+          SERVICE_ARN: ${{ steps.svc.outputs.arn }}
         run: |
           set -uo pipefail
           OP=$(aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query OperationId --output text) || exit 1
@@ -130,8 +149,12 @@ jobs:
 
       - name: First image pushed (App Runner service not created yet)
         id: built
-        if: env.SERVICE_ARN == ''
-        run: echo "built=true" >> "$GITHUB_OUTPUT"
+        if: steps.svc.outputs.arn == ''
+        run: |
+          echo "built=true" >> "$GITHUB_OUTPUT"
+          echo "Image is in ECR, but no App Runner service exists yet. Create it once (as your"
+          echo "console identity, not the CI user) — see docs/DEPLOY_AWS.md Phase B. After that,"
+          echo "this job finds it by name and deploys automatically; no secret to set."
 
       - name: Comment the result on the commit
         if: always()
