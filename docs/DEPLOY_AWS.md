@@ -125,6 +125,17 @@ for az in $(aws ec2 describe-availability-zones --region $AWS_REGION \
 done
 ```
 
+**Create the ECS service-linked roles (first-ever ECS use only).** If the account has never used
+ECS, the first deploy fails with *"Unable to assume the service linked role."* These are one-time,
+account-wide roles the CI user deliberately can't create — make them once as your console identity
+(each is harmless if it already exists):
+
+```bash
+aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com 2>&1 || true
+aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com 2>&1 || true
+aws iam create-service-linked-role --aws-service-name ecs.application-autoscaling.amazonaws.com 2>&1 || true
+```
+
 That is all the hand-setup there is: **you do not create the service by hand.** CI's deploy
 action creates it on the first push to `main` and updates it afterwards.
 
