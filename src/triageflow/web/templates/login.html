@@ -14,94 +14,56 @@
   </script>
 </head>
 <body class="bg-white text-ink font-sans antialiased">
-  <header class="border-b border-line">
-    <div class="max-w-[1200px] mx-auto px-4 h-14 flex items-center justify-between">
-      <div class="flex items-center gap-2.5">
-        <div class="h-6 w-6 rounded-md bg-ink flex items-center justify-center">
-          <span class="text-white text-[13px] font-bold">T</span>
-        </div>
-        <div class="leading-tight">
-          <div class="font-semibold text-[15px]">TriageFlow <span class="text-subtle font-normal">Lite</span></div>
-          <div class="text-[11px] text-subtle -mt-0.5">SATS-sourced priority · nurse-confirmed</div>
-        </div>
+  <main class="login2">
+    <!-- brand -->
+    <div class="login2-brand">
+      <div class="login2-logo">T</div>
+      <div>
+        <div class="text-[17px] font-bold leading-none">TriageFlow <span class="text-subtle font-normal">Lite</span></div>
+        <div class="text-[12px] text-subtle mt-1">Priority triage, sourced to the SATS chart.</div>
       </div>
-      <span class="chip chip-warn text-[11px]">⚠ demo · not a medical device</span>
     </div>
-  </header>
 
-  <main class="login-wrap">
-    <div class="login-grid">
-      <!-- Left 2/3 — what the system does, in plain language + the SATS colour table -->
-      <section class="sats-card">
-        <h1 class="text-[22px] font-extrabold leading-tight">Sort patients by how urgently they need care — in seconds, with the reason shown.</h1>
-        <p class="text-[14px] text-subtle mt-2 leading-relaxed">
-          A nurse enters the complaint and vital signs. TriageFlow calculates a priority from the
-          <b>South African Triage Scale (SATS)</b> — the same chart used at the desk — and a language
-          model reads the complaint to suggest signs the numbers alone can’t show. <b>The nurse decides;
-          the system only proposes.</b> Nothing joins the queue until a named clinician confirms it.
-        </p>
-        <div class="sec-h mt-5 mb-1">The five priority levels</div>
-        <table class="sats-table">
-          {% for code, acuity, time, desc in bands %}
-          <tr class="sats-row">
-            <td class="band-cell band-{{ code }}">{{ code }}</td>
-            <td class="mid-cell"><div class="acuity">{{ acuity }}</div><div class="desc">{{ desc }}</div></td>
-            <td class="time-cell band-cell-time">{{ time }}</td>
-          </tr>
+    <!-- SATS legend: colour-coded bands with score range + target -->
+    <div class="sats2">
+      <div class="sats2-head">
+        <span>SATS priority</span><span>TEWS score</span><span>See within</span>
+      </div>
+      {% for code, acuity, score, time in bands %}
+      <div class="sats2-row band-{{ code }}">
+        <span class="s-band">{{ code }}<em>{{ acuity }}</em></span>
+        <span class="s-score">{{ score }}</span>
+        <span class="s-time">{{ time }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- compact demo sign-in -->
+    <div class="login2-signin">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[12px] font-semibold text-subtle uppercase tracking-wide">Sign in</span>
+        <span class="demo-badge"><span class="d"></span>Demo</span>
+      </div>
+      <div class="flex gap-2">
+        <select id="staff" class="flex-1">
+          <option value="">Choose a staff member…</option>
+          {% for s in roster %}
+          <option value="{{ s.id }}">{{ s.name }} · {{ s.role }}</option>
           {% endfor %}
-        </table>
-        <p class="text-[12px] text-subtle mt-3 mb-2">
-          Every priority is calculated by code (repeatable arithmetic), cited to the SATS manual, and
-          re-checked against the protocol text — not a model’s opinion. Anything that isn’t SATS is
-          labelled a local rule.
-        </p>
-      </section>
-
-      <!-- Right 1/3 — demo sign-in -->
-      <aside class="login-card">
-        <div class="flex items-center justify-between">
-          <div class="text-[15px] font-bold">Sign in</div>
-          <span class="demo-badge"><span class="d"></span>Demo · not real data</span>
-        </div>
-        <p class="text-[12.5px] text-subtle mt-2 leading-relaxed">
-          Pick a staff member to start the triage desk. This stands in for a real login — the name you
-          choose is recorded against every priority you confirm, so you never retype it.
-        </p>
-        <label class="field mt-4"><span>Nursing / clinical staff</span>
-          <select id="staff" class="login-staff">
-            <option value="">— choose a staff member —</option>
-            {% for s in roster %}
-            <option value="{{ s.id }}">{{ s.name }} · {{ s.role }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <div id="staff-detail" class="hidden text-[12px] text-subtle mt-2 bg-gray-50 border border-line rounded-md px-3 py-2"></div>
-        <button id="btn-login" class="btn bg-ink text-white w-full mt-4" disabled>Start triage desk →</button>
-        <div id="login-err" class="hidden note-red mt-2"></div>
-        <p class="text-[11px] text-subtle mt-3">
-          Staff shown here are fictional, for demonstration only. Data region:
-          <b>{{ data_region }}</b>.
-        </p>
-      </aside>
+        </select>
+        <button id="btn-login" class="btn bg-ink text-white whitespace-nowrap" disabled>Start →</button>
+      </div>
+      <div id="login-err" class="hidden note-red mt-2"></div>
     </div>
+    <p class="text-[11px] text-subtle text-center mt-4">Demo · synthetic data only · staff are fictional</p>
   </main>
 
   <script>
     const ROSTER = {{ roster | tojson }};
     const sel = document.getElementById("staff");
     const btn = document.getElementById("btn-login");
-    const detail = document.getElementById("staff-detail");
     const err = document.getElementById("login-err");
-    const byId = Object.fromEntries(ROSTER.map(s => [s.id, s]));
-    sel.addEventListener("change", () => {
-      const s = byId[sel.value];
-      btn.disabled = !s;
-      if (s) {
-        detail.classList.remove("hidden");
-        detail.innerHTML = `Reg no <b>${s.reg_no}</b> · ${s.shift} shift`
-          + (s.senior ? ` · <b>senior</b> — may override a priority` : "");
-      } else { detail.classList.add("hidden"); }
-    });
+    sel.addEventListener("change", () => { btn.disabled = !sel.value; });
     btn.addEventListener("click", async () => {
       if (!sel.value) return;
       btn.disabled = true; err.classList.add("hidden");

@@ -234,12 +234,13 @@ async def login_page(request: Request):
     # Already signed in? Go straight to the workspace.
     if _current_staff(request) is not None:
         return RedirectResponse("/", status_code=303)
+    # code, acuity, TEWS score range, target time
     bands = [
-        ("RED", "Emergency", R.TARGET_TIME[R.Priority.RED], "Life-threatening — straight to resuscitation."),
-        ("ORANGE", "Very urgent", R.TARGET_TIME[R.Priority.ORANGE], "Could deteriorate fast — seen within minutes."),
-        ("YELLOW", "Urgent", R.TARGET_TIME[R.Priority.YELLOW], "Needs care soon, but stable for now."),
-        ("GREEN", "Routine", R.TARGET_TIME[R.Priority.GREEN], "Stable — safe to wait."),
-        ("BLUE", "Deceased", R.TARGET_TIME[R.Priority.BLUE], "Refer for certification."),
+        ("RED", "Emergency", "7+", R.TARGET_TIME[R.Priority.RED]),
+        ("ORANGE", "Very urgent", "5–6", R.TARGET_TIME[R.Priority.ORANGE]),
+        ("YELLOW", "Urgent", "3–4", R.TARGET_TIME[R.Priority.YELLOW]),
+        ("GREEN", "Routine", "0–2", R.TARGET_TIME[R.Priority.GREEN]),
+        ("BLUE", "Deceased", "—", R.TARGET_TIME[R.Priority.BLUE]),
     ]
     return templates.TemplateResponse(request, "login.html", {
         "roster": [s.public() for s in staff_roster.roster()],
