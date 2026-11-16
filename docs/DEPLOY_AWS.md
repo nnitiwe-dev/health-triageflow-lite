@@ -109,13 +109,20 @@ aws iam attach-role-policy --role-name ecsInfrastructureRoleForExpressServices \
 > IAM roles are eventually consistent — if the very first deploy fails with "Unable to assume
 > the … role" seconds after you create these, wait a minute and re-run it.
 
-**Make sure the region has a default VPC.** Express Mode puts its load balancer in your account's
-default VPC and public subnets. Many new accounts don't have one (it was never created, or was
-deleted), and the deploy then fails with *"No default VPC or subnets found in the region."* Create
-one (free, idempotent — errors harmlessly if it already exists):
+**Make sure the region has a default VPC _with_ public subnets.** Express Mode puts its load
+balancer in your account's default VPC and public subnets. If the deploy fails with *"No default
+VPC or subnets found in the region,"* create them (free, idempotent):
 
 ```bash
+# 1. Create the default VPC (skip if it says DefaultVpcAlreadyExists — the VPC is already there).
 aws ec2 create-default-vpc --region $AWS_REGION
+
+# 2. If the VPC exists but its default subnets were deleted (the usual cause of the error above —
+#    you get DefaultVpcAlreadyExists AND "no subnets found"), recreate a default subnet per AZ:
+for az in $(aws ec2 describe-availability-zones --region $AWS_REGION \
+            --query 'AvailabilityZones[?State==`available`].ZoneName' --output text); do
+  aws ec2 create-default-subnet --availability-zone "$az" --region $AWS_REGION 2>&1 | sed "s/^/[$az] /"
+done
 ```
 
 That is all the hand-setup there is: **you do not create the service by hand.** CI's deploy
