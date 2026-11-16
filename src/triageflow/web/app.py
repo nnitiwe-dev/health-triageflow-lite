@@ -130,6 +130,8 @@ async def _bring_up_model() -> None:
 async def _warm_up_once() -> None:
     """Load the active model and prime its prompt cache — once per model."""
     model = _state.get("model")
+    if model and not _state.get("starting"):
+        _state["startup_msg"] = ""          # up and resolved: drop the "loading…" text
     if not _state.get("llm_enabled") or not model or _state.get("warmed") == model \
             or _state.get("warming"):
         return

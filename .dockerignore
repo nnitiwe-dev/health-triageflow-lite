@@ -1,0 +1,17 @@
+# Keep the build context small and the image lean. The model + runtime are fetched inside the
+# build (see Dockerfile), never copied from here.
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+tests
+evals
+docs
+*.md
+!README.md
+.claude
+.DS_Store
+.triageflow

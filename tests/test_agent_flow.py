@@ -391,3 +391,17 @@ def test_switching_the_model_keeps_runs_that_are_waiting_at_the_gate():
         a.set_llm(None, None)
         assert not a.llm_enabled
     run(go())
+
+
+def test_audit_trail_records_each_step_once_including_the_wait_at_the_gate():
+    from triageflow.core.audit import get_audit
+
+    async def go():
+        a = agent()
+        eid = "AUDIT-ONCE-1"
+        st = await a.start(enc(eid, "chest pain"), nurse_confirmed_codes=["chest_pain"])
+        await a.approve(st["run_id"], NURSE)
+        events = [r["event"] for r in get_audit().trail(eid)]
+        assert events.count("await_approval") == 1 and events.count("approval") == 1
+        assert events.index("await_approval") < events.index("approval")
+    run(go())

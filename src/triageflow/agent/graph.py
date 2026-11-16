@@ -309,6 +309,17 @@ class TriageAgent:
                  "source": R.DISCRIMINATORS_BY_CODE[c].source, "via": "vitals"} for c in codes]
 
     async def _extract(self, state: TriageState) -> dict[str, Any]:
+        out = await self._suggest_signs(state)
+        # The run now waits at the gate. Logged HERE, once: a LangGraph node that interrupts
+        # is re-executed from its first line on resume, so logging inside the approval node
+        # wrote this entry twice for every approved patient.
+        audit.record("await_approval", encounter_id=state["encounter"].get("encounter_id"),
+                     tool="agent",
+                     payload={"proposed": (state.get("result") or {}).get("proposed_priority"),
+                              "run_id": state.get("run_id")})
+        return out
+
+    async def _suggest_signs(self, state: TriageState) -> dict[str, Any]:
         enc = state["encounter"]
         prior = state.get("prior_candidates")
         from_vitals = self._vitals_candidates(enc)
@@ -376,9 +387,6 @@ class TriageAgent:
             "explanation": state.get("explanation"),
             "verification": state.get("verification"),
         }
-        audit.record("await_approval", encounter_id=payload["encounter_id"],
-                     tool="agent", payload={"proposed": payload["proposed_priority"],
-                                            "run_id": state.get("run_id")})
         decision = interrupt(payload)  # ⏸ pause for the human gate
         return {"approval": decision, "status": "approved"}
 
