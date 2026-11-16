@@ -58,6 +58,30 @@ jobs:
       - name: Provision llama-server, start it, generate, stop
         run: uv run python evals/runtime_smoke.py
 
+  # Did this push touch anything that goes INTO the container image? The deploy job runs only
+  # when it did, so a docs- or test-only change to main skips the ~5 GB build and the redeploy
+  # entirely. (Runs only on main pushes; on PRs it's skipped, which skips deploy too.)
+  changes:
+    name: Image-relevant changes?
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            image:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'src/**'
+              - 'protocols/**'
+              - '.github/workflows/ci.yml'
+
   # Build the demo image and deploy to Amazon ECS Express Mode — only on main, only after every
   # test and runtime job above has passed, and only once the deployer has opted in by setting the
   # repository variable DEPLOY_TO_AWS=true (so this stays off, and free, until AWS is wired up).
@@ -69,8 +93,8 @@ jobs:
   # accounts. One-time AWS setup + the secrets/variables this needs are in docs/DEPLOY_AWS.md.
   deploy:
     name: Build & deploy to Amazon ECS Express Mode
-    needs: [test, runtime]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.DEPLOY_TO_AWS == 'true'
+    needs: [test, runtime, changes]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.DEPLOY_TO_AWS == 'true' && needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # to post the result as a commit comment
@@ -100,10 +124,13 @@ jobs:
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
-          # Reuse unchanged layers (the ~5 GB model layer) from the last pushed image, so only
-          # app changes rebuild. Keeps CI off the GitHub Actions cache size limit.
-          cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
-          cache-to: type=inline
+          # A dedicated `:buildcache` tag with mode=max caches EVERY stage — including the
+          # `assets` stage that downloads the ~5 GB model + llama.cpp binary. So when a build does
+          # run, only changed app layers rebuild and the model is reused, never re-downloaded.
+          # (inline cache couldn't cache that intermediate stage; this can.) image-manifest +
+          # oci-mediatypes make the registry cache compatible with Amazon ECR.
+          cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:buildcache
+          cache-to: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
       # First-party AWS action: creates the Express Mode service the first time, then updates it
       # in place (rolling, zero-downtime) on every later run. It creates the `default` cluster if

@@ -198,7 +198,12 @@ gh variable set ECS_INFRASTRUCTURE_ROLE_ARN --body "arn:aws:iam::$ACCOUNT_ID:rol
 
 The `deploy` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) stays **skipped**
 until `DEPLOY_TO_AWS` is `true`, runs **only on `main`**, and **only after** every test and
-runtime job passes.
+runtime job passes. It also only runs when the push actually changed something that goes into the
+image (`Dockerfile`, `.dockerignore`, `pyproject.toml`, `uv.lock`, `src/**`, `protocols/**`, or
+the workflow itself) — a docs- or test-only commit skips the build and redeploy. When it does
+build, a `:buildcache` image tag (mode=max) lets it reuse the ~5 GB model layer instead of
+re-downloading it, so only changed app layers rebuild. The buildcache adds a few GB of ECR
+storage (≈ US$0.10/GB-month).
 
 **3. Deploy** by pushing to `main` (or re-running the latest `main` workflow). The job builds the
 image, pushes it to ECR reusing the unchanged model layer, then the deploy action creates the
@@ -261,7 +266,9 @@ variable (via the action's `environment-variables` input) and drop to `1024`/`20
 
 ## Troubleshooting
 
-- **Deploy job was skipped** — `DEPLOY_TO_AWS` is not `true`, or the push was not to `main`.
+- **Deploy job was skipped** — `DEPLOY_TO_AWS` is not `true`, the push was not to `main`, or the
+  commit changed only docs/tests (nothing that affects the image). To force a redeploy with no
+  code change, bump a comment in the `Dockerfile` or re-run the last image-changing workflow.
 - **`Account … can't create new App Runner services`** — you're on an old App Runner workflow;
   this guide/pipeline no longer use App Runner (see the top). Pull `main` so you have the
   Express Mode `deploy` job.
