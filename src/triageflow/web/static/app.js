@@ -379,10 +379,20 @@ async function loadQueue(highlightId) {
       <div class="qprio ${esc(p)}">${esc(p)} · ${esc(item.acuity)}</div>
       <div class="qcomplaint mt-0.5">${esc(item.complaint || "—")}</div>
       <div class="text-[11px] text-subtle mt-1">${esc(id)} · TEWS ${item.tews_total ?? "–"}</div>
+      ${item.is_next ? `<button class="qseen" data-id="${esc(id)}" title="Doctor has seen this patient — remove from the queue"><span class="tick">✓</span> Mark seen</button>` : ""}
     </div>`;
   }).join("");
   window._queue = q;
   document.querySelectorAll(".qcard").forEach(el => el.onclick = () => fillForm(window._queue[+el.dataset.i].encounter));
+  $("queue").querySelectorAll(".qseen").forEach(b => b.onclick = (e) => { e.stopPropagation(); markSeen(b.dataset.id); });
+}
+
+async function markSeen(id) {
+  try {
+    await fetch("/api/queue/seen", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ encounter_id: id }) });
+  } catch { /* leave the queue as-is on failure */ }
+  loadQueue();
 }
 
 async function loadSynthetic() {

@@ -1,24 +1,30 @@
-/* Minimal, Vercel-like: white, thin lines, rounded cards, restrained type. */
-.chip { padding: 2px 8px; border: 1px solid #ededed; border-radius: 9999px; color: #6b7280; white-space: nowrap; }
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&display=swap');
+/* Minimal, Vercel-like: white, thin lines, tight radii, restrained type (Geist). */
+:root { --border: #eaeaea; --border-strong: #d4d4d8; }
+body.font-sans, body { font-family: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.006em; }
+h1, h2, h3 { letter-spacing: -0.021em; }
+.chip { padding: 2px 9px; border: 1px solid var(--border); border-radius: 9999px; color: #6b7280;
+  white-space: nowrap; font-weight: 450; }
 .chip-warn { color: #92400e; border-color: #fde68a; background: #fffbeb; }
 .chip-select { border: none; background: transparent; font: inherit; color: #0a0a0a; padding: 0 2px;
   outline: none; cursor: pointer; max-width: 220px; }
 .chip-select:focus { box-shadow: none; }
 
-.card { border: 1px solid #ededed; border-radius: 12px; background: #fff; overflow: hidden; }
-.card-h { padding: 10px 16px; border-bottom: 1px solid #ededed; font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .03em; color: #374151; background: #fafafa; }
+.card { border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden; }
+.card-h { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .02em; color: #374151; background: #fafafa; }
 
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field > span { font-size: 11px; color: #6b7280; font-weight: 500; }
-input, select, textarea { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; font-size: 13px;
+input, select, textarea { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px;
   outline: none; background: #fff; width: 100%; transition: border-color .12s, box-shadow .12s; }
 input:focus, select:focus, textarea:focus { border-color: #0a0a0a; box-shadow: 0 0 0 3px rgba(10,10,10,.06); }
 
-.btn { padding: 9px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+.btn { padding: 9px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
   transition: opacity .12s, background .12s; }
-.btn:hover { opacity: .9; }
-.btn-sm { padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.btn:hover { opacity: .88; }
+.btn-sm { padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* trace entries */
@@ -62,10 +68,17 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .note-red { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
 .note-orange { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
 .fold > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: #374151; list-style: none;
-  padding: 7px 10px; border: 1px solid #ededed; border-radius: 8px; background: #fafafa; }
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
+  display: flex; align-items: center; gap: 8px; transition: background .12s, border-color .12s, color .12s; }
+.fold > summary:hover { background: #f4f4f5; border-color: var(--border-strong); color: #0a0a0a; }
+.fold[open] > summary { background: #f4f4f5; border-color: var(--border-strong); }
 .fold > summary::-webkit-details-marker { display: none; }
-.fold > summary::before { content: "▸"; display: inline-block; width: 14px; color: #9ca3af; }
-.fold[open] > summary::before { content: "▾"; }
+/* clear, rotating caret on the right so it reads as expandable */
+.fold > summary::after { content: ""; margin-left: auto; width: 7px; height: 7px; flex: none;
+  border-right: 1.6px solid #9ca3af; border-bottom: 1.6px solid #9ca3af; transform: rotate(45deg);
+  transition: transform .18s ease; margin-top: -2px; }
+.fold[open] > summary::after { transform: rotate(-135deg); margin-top: 2px; }
+.fold > summary:hover::after { border-color: #0a0a0a; }
 .stale-dim { opacity: .45; }
 
 /* why / do-now / check lists */
@@ -115,6 +128,14 @@ table.tews tr.total td { border-top: 1px solid #d1d5db; border-bottom: none; fon
 .qtag.mine { color: #166534; border-color: #bbf7d0; background: #f0fdf4; }
 .qprio { font-size: 11px; font-weight: 700; }
 .qprio.RED { color: #dc2626; } .qprio.ORANGE { color: #ea580c; } .qprio.YELLOW { color: #a16207; } .qprio.GREEN { color: #15803d; }
+/* "mark seen" — only on the next-in-line card; small and clear, doesn't crowd the card */
+.qseen { margin-top: 8px; width: 100%; font-size: 11.5px; font-weight: 600; padding: 5px 8px;
+  border-radius: 6px; border: 1px solid var(--border); background: #fff; color: #111; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  transition: background .12s, border-color .12s; }
+.qseen:hover { background: #0a0a0a; color: #fff; border-color: #0a0a0a; }
+.qseen .tick { color: #16a34a; font-weight: 800; }
+.qseen:hover .tick { color: #86efac; }
 
 /* ===== fixed dark bottom navbar (shared across pages) ================================= */
 body { padding-bottom: 60px; }   /* room for the fixed bar — never overlaps content */

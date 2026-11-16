@@ -100,7 +100,7 @@ app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static"
 
 _state: dict[str, Any] = {"agent": None, "mcp": None, "model": None, "backend": None,
                           "using_fallback": False, "servers": [], "confirmed": [],
-                          "llm_enabled": False}
+                          "llm_enabled": False, "seen": set()}
 _tasks: set[asyncio.Task] = set()   # keep references so background tasks aren't collected
 
 
@@ -496,6 +496,9 @@ async def queue_demo(n: int = 6, seed: int = 42):
             "complaint": enc.presenting_complaint,
             "arrival": enc.arrival_time.isoformat(),
         })
+    # Drop anyone the doctor has already marked seen (leaves the waiting queue).
+    seen = _state.get("seen") or set()
+    out = [o for o in out if o["encounter"].get("encounter_id") not in seen]
     # Order by acuity (then arrival) so the most urgent surfaces — the point of the desk.
     out.sort(key=lambda x: (_ORDER.get(x["priority"], 5), x.get("arrival", "")))
     total = len(out)
@@ -507,6 +510,23 @@ async def queue_demo(n: int = 6, seed: int = 42):
         item["acuity"] = R.ACUITY_NAME[R.Priority(p)] if p else ""
         item["target"] = TARGET_TEXT.get(p, "")
     return out
+
+
+@app.post("/api/queue/seen")
+async def queue_seen(request: Request):
+    """Mark the next-in-line patient as seen by the doctor: they leave the waiting queue, and
+    the hand-off is recorded in the audit trail (so it shows in history/logs too)."""
+    body = await request.json()
+    enc_id = (body or {}).get("encounter_id")
+    if not enc_id:
+        return JSONResponse({"error": "encounter_id is required"}, status_code=400)
+    _state["seen"].add(enc_id)
+    _state["confirmed"] = [c for c in _state["confirmed"]
+                           if c["encounter"].get("encounter_id") != enc_id]
+    staff = _current_staff(request)
+    audit.record("seen", encounter_id=enc_id, actor=(staff.name if staff else "clinician"),
+                 tool="mark_seen", payload={"by": staff.name if staff else None})
+    return {"ok": True, "encounter_id": enc_id}
 
 
 @app.get("/api/synthetic")
