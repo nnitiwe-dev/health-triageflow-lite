@@ -12,8 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The desk PC may be Windows, macOS or Linux — every push is tested on all three.
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The desk PC may be Windows or Linux — tested on both. (macOS runners are scarce and
+        # slow to schedule, so they're off; re-add macos-latest here if you need that coverage.)
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     env:
       PYTHONUTF8: "1"
@@ -47,7 +48,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macOS runners are scarce/slow to schedule — off for now (re-add macos-latest if needed).
+        os: [ubuntu-latest, windows-latest]
     env:
       PYTHONUTF8: "1"
     steps:
