@@ -68,7 +68,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.DEPLOY_TO_AWS == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write          # to post the result as a commit comment
     env:
       SERVICE_ARN: ${{ secrets.APPRUNNER_SERVICE_ARN }}
     steps:
@@ -102,16 +102,70 @@ jobs:
           cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
           cache-to: type=inline
 
-      - name: Trigger App Runner deployment
+      - name: Deploy to App Runner and wait for the rollout
+        id: deploy
         if: env.SERVICE_ARN != ''
         run: |
-          aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query 'OperationId' --output text
-          echo "App Runner is rolling out the new image. Watch it in the console or with:"
-          echo "  aws apprunner describe-service --service-arn \$SERVICE_ARN --query 'Service.Status'"
+          set -uo pipefail
+          OP=$(aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query OperationId --output text) || exit 1
+          echo "started deployment $OP"
+          URL=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --query 'Service.ServiceUrl' --output text)
+          sleep 20                                   # let Status flip to OPERATION_IN_PROGRESS
+          STATUS=UNKNOWN
+          for i in $(seq 1 40); do                   # up to ~10 min
+            STATUS=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --query 'Service.Status' --output text)
+            echo "[$i] status=$STATUS"
+            case "$STATUS" in
+              RUNNING) break ;;
+              *FAILED*|PAUSED|DELETE*) break ;;
+            esac
+            sleep 15
+          done
+          {
+            echo "deployed=true"
+            echo "status=$STATUS"
+            echo "url=https://$URL"
+            echo "operation=$OP"
+          } >> "$GITHUB_OUTPUT"
 
       - name: First image pushed (App Runner service not created yet)
+        id: built
         if: env.SERVICE_ARN == ''
-        run: |
-          echo "Image pushed to ECR as :latest. Create the App Runner service from it (see"
-          echo "docs/DEPLOY_AWS.md Phase B), then add the APPRUNNER_SERVICE_ARN secret — the"
-          echo "next push to main will deploy automatically."
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
+
+      - name: Comment the result on the commit
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          DEPLOYED: ${{ steps.deploy.outputs.deployed }}
+          STATUS: ${{ steps.deploy.outputs.status }}
+          URL: ${{ steps.deploy.outputs.url }}
+          OPERATION: ${{ steps.deploy.outputs.operation }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+        with:
+          script: |
+            const { DEPLOYED, STATUS, URL, OPERATION, DEPLOY_OUTCOME } = process.env;
+            const sha = context.sha.slice(0, 7);
+            let body;
+            if (DEPLOYED === 'true') {
+              const ok = STATUS === 'RUNNING';
+              body = `### ${ok ? '✅' : '⏳'} App Runner deploy — \`${STATUS}\`\n\n`
+                   + `**Live demo:** ${URL}\n\nImage \`${sha}\` · deployment \`${OPERATION}\``
+                   + (ok ? '' : `\n\n_Still rolling out — give it a minute, then refresh._`);
+            } else if (DEPLOY_OUTCOME === 'failure') {
+              body = `### ❌ App Runner deploy failed\n\nImage \`${sha}\` was pushed, but `
+                   + `\`start-deployment\` or the rollout did not succeed — see the run logs.`;
+            } else {
+              body = `### 📦 Image pushed to ECR (\`:latest\`, \`${sha}\`)\n\nNo App Runner `
+                   + `service yet — create it from this image, then add the \`APPRUNNER_SERVICE_ARN\` `
+                   + `secret and the next push to main deploys automatically.`;
+            }
+            core.summary.addRaw(body).write();
+            try {
+              await github.rest.repos.createCommitComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                commit_sha: context.sha, body,
+              });
+            } catch (e) {
+              core.warning(`could not post commit comment: ${e.message}`);
+            }
