@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TriageFlow Lite — history</title>
+  <script src="https://cdn.tailwindcss.com/3.4.13"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}" />
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+      colors: { ink: '#0a0a0a', subtle: '#6b7280', line: '#ededed' } } } };
+  </script>
+</head>
+<body class="bg-white text-ink font-sans antialiased">
+  <main class="hwrap">
+    <div class="flex items-center justify-between mb-1">
+      <h1 class="text-[20px] font-extrabold">History &amp; tracing</h1>
+      <span class="chip text-[11px]">read-only · from the audit trail</span>
+    </div>
+    <p class="text-[12.5px] text-subtle mb-4">Every assessment and every confirmed disposition, straight from the append-only audit log. For tracing, review, and quality improvement.</p>
+
+    <!-- list view -->
+    <div id="list-view">
+      <div class="tabs">
+        <div class="tab on" data-tab="runs">Patient runs</div>
+        <div class="tab" data-tab="queue">Queue history</div>
+      </div>
+
+      <section id="tab-runs">
+        <div id="runs-body"><div class="muted text-[13px] py-6">Loading…</div></div>
+      </section>
+
+      <section id="tab-queue" class="hidden">
+        <div id="queue-stats" class="stat-row"></div>
+        <div id="queue-body"><div class="muted text-[13px] py-6">Loading…</div></div>
+      </section>
+    </div>
+
+    <!-- detail view (one encounter's full trace) -->
+    <div id="detail-view" class="hidden">
+      <div class="back-link mb-3" id="back">← back to history</div>
+      <div id="detail-head" class="panel mb-4"></div>
+      <div class="sec-h">Full trace — every recorded step</div>
+      <div id="detail-trace" class="panel mt-1 p-0"></div>
+    </div>
+  </main>
+  {% include "_nav.html" %}
+  <script src="/static/history.js?v={{ asset_v }}"></script>
+</body>
+</html>

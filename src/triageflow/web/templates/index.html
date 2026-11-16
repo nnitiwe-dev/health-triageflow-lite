@@ -188,7 +188,12 @@
             <!-- approval gate -->
             <div id="gate" class="pt-3 border-t border-line space-y-2.5">
               <div class="text-[12px] font-semibold">Clinician approval</div>
-              <input id="a-name" placeholder="Your name (approving clinician)" class="w-full"/>
+              <div class="flex items-center gap-2 text-[12.5px] bg-gray-50 border border-line rounded-md px-3 py-2">
+                <span class="tfnav-dot"></span>
+                <span>Approving as <b>{{ staff.name }}</b> <span class="text-subtle">· {{ staff.role }}</span></span>
+                <span class="text-subtle text-[11px] ml-auto">sign out below to change</span>
+              </div>
+              <input id="a-name" type="hidden" value="{{ staff.name }}"/>
               <select id="a-override" class="w-full"><option value="">Approve as proposed</option>
                 <option value="RED">Override → RED (emergency)</option><option value="ORANGE">Override → ORANGE (very urgent)</option>
                 <option value="YELLOW">Override → YELLOW (urgent)</option><option value="GREEN">Override → GREEN (routine)</option></select>
@@ -209,6 +214,7 @@
       </section>
     </div>
   </main>
+  {% include "_nav.html" %}
   <script src="/static/app.js?v={{ asset_v }}"></script>
 </body>
 </html>

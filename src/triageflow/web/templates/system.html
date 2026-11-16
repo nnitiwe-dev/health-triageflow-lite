@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TriageFlow Lite — system</title>
+  <script src="https://cdn.tailwindcss.com/3.4.13"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}" />
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+      colors: { ink: '#0a0a0a', subtle: '#6b7280', line: '#ededed' } } } };
+  </script>
+</head>
+<body class="bg-white text-ink font-sans antialiased">
+  <main class="hwrap">
+    <h1 class="text-[20px] font-extrabold mb-1">System &amp; model</h1>
+    <p class="text-[12.5px] text-subtle mb-4">What’s running under the hood — the language model, the tool servers, the data region, and the safety constants. All read-only.</p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="panel">
+        <div class="sec-h">Language model &amp; runtime</div>
+        <dl class="kv" id="kv-model"><dd class="muted">Loading…</dd></dl>
+      </div>
+      <div class="panel">
+        <div class="sec-h">Tooling &amp; integration</div>
+        <dl class="kv" id="kv-tools"><dd class="muted">Loading…</dd></dl>
+      </div>
+      <div class="panel">
+        <div class="sec-h">Safety constants (this build)</div>
+        <dl class="kv">
+          <dt>SpO₂ safety floor</dt><dd>{{ spo2_floor }}% — below this escalates to ORANGE <span class="muted">(local rule, not SATS)</span></dd>
+          <dt>Hypoglycaemia (RED)</dt><dd>glucose ≤ {{ hypo_max }} mmol/L</dd>
+          <dt>Protocol source</dt><dd class="font-mono text-[12px]">{{ protocols_dir }}</dd>
+        </dl>
+      </div>
+      <div class="panel">
+        <div class="sec-h">How a priority is decided</div>
+        <ol class="text-[13px] leading-relaxed list-decimal pl-5 space-y-1">
+          <li>Code validates the intake and calculates the SATS/TEWS priority — <b>no model involved</b>.</li>
+          <li>The model reads the free-text complaint and <b>suggests</b> signs; the nurse accepts or rejects each.</li>
+          <li>The priority is the most urgent of the TEWS band and the nurse-confirmed signs.</li>
+          <li>Every point is cited and re-checked against the protocol text before approval.</li>
+          <li>A named clinician confirms — only then does the patient join the queue.</li>
+        </ol>
+      </div>
+    </div>
+  </main>
+  {% include "_nav.html" %}
+  <script>
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+    (async () => {
+      let s; try { s = await (await fetch("/api/status")).json(); } catch { s = {}; }
+      const ready = !!s.model_ready;
+      document.getElementById("kv-model").innerHTML =
+        row("Active model", `<b>${esc(s.model || "none detected")}</b>`) +
+        row("Status", ready ? '<span class="pill GREEN">loaded</span>' : (s.starting ? '<span class="pill ORANGE">starting</span>' : '<span class="pill none">deterministic only</span>')) +
+        row("Backend", esc(s.backend || "—")) +
+        row("Runtime installed", s.runtime_installed ? "yes" : "no") +
+        row("LLM suggestions", s.llm_enabled ? "on" : (s.llm_off_by_config ? "off (configured)" : "off — scoring still works"));
+      document.getElementById("kv-tools").innerHTML =
+        row("MCP servers", esc((s.servers || []).join(" + ") || "—")) +
+        row("Data region", `<b>${esc(s.data_region || "—")}</b>`) +
+        row("FHIR / EMR", (s.fhir && s.fhir.enabled) ? `on · ${esc((s.fhir.base_url || "").replace(/^https?:\/\//, ""))}` : "off (fully local)") +
+        row("Handover note", s.handover_note ? "on" : "off");
+    })();
+  </script>
+</body>
+</html>

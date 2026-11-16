@@ -1,0 +1,27 @@
+<!-- Fixed dark bottom navbar, shared across pages. `active` + `staff` come from the view. -->
+<nav class="tfnav" aria-label="Primary">
+  <div class="tfnav-inner">
+    <div class="tfnav-brand">TriageFlow<span>Lite</span></div>
+    <div class="tfnav-links">
+      <a href="/" class="tfnav-link {{ 'on' if active == 'workspace' else '' }}">
+        <span class="tfnav-ico">◧</span>Workspace</a>
+      <a href="/history" class="tfnav-link {{ 'on' if active == 'history' else '' }}">
+        <span class="tfnav-ico">◴</span>History</a>
+      <a href="/logs" class="tfnav-link {{ 'on' if active == 'logs' else '' }}">
+        <span class="tfnav-ico">≣</span>Logs</a>
+      <a href="/system" class="tfnav-link {{ 'on' if active == 'system' else '' }}">
+        <span class="tfnav-ico">⚙</span>System</a>
+    </div>
+    <div class="tfnav-right">
+      {% if staff %}
+      <span class="tfnav-staff" title="Signed in for this demo — not a real login">
+        <span class="tfnav-dot"></span>
+        <span class="tfnav-name">{{ staff.name }}</span>
+        <span class="tfnav-role">{{ staff.role }}</span>
+      </span>
+      <button id="tfnav-logout" class="tfnav-logout" type="button">Sign out</button>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+<script src="/static/nav.js?v={{ asset_v }}"></script>

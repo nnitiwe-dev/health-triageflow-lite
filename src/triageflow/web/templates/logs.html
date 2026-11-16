@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TriageFlow Lite — logs</title>
+  <script src="https://cdn.tailwindcss.com/3.4.13"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}" />
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+      colors: { ink: '#0a0a0a', subtle: '#6b7280', line: '#ededed' } } } };
+  </script>
+</head>
+<body class="bg-white text-ink font-sans antialiased">
+  <main class="hwrap">
+    <div class="flex items-center justify-between mb-1">
+      <h1 class="text-[20px] font-extrabold">Audit log</h1>
+      <span class="chip text-[11px]">append-only · newest first</span>
+    </div>
+    <p class="text-[12.5px] text-subtle mb-4">The raw, append-only record: every tool call, flag, and clinician decision, exactly as written to <span class="font-mono">audit.jsonl</span> and SQLite. Nothing here is edited or deleted.</p>
+    <div class="flex items-center gap-2 mb-3">
+      <input id="filter" placeholder="Filter by encounter id (e.g. OPD-1423-517)" class="max-w-[320px]" />
+      <button id="clear" class="btn-sm border border-line">Clear</button>
+      <span id="count" class="muted text-[12px] ml-1"></span>
+    </div>
+    <div id="log" class="panel"></div>
+  </main>
+  {% include "_nav.html" %}
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    function hms(ts) { const d = new Date(ts); return isNaN(d) ? esc(ts) : d.toISOString().slice(0, 19).replace("T", " "); }
+    async function load() {
+      const f = $("filter").value.trim();
+      const url = "/api/history/events?limit=400" + (f ? "&encounter_id=" + encodeURIComponent(f) : "");
+      let rows; try { rows = await (await fetch(url)).json(); } catch { rows = []; }
+      $("count").textContent = rows.length ? `${rows.length} event${rows.length === 1 ? "" : "s"}` : "";
+      $("log").innerHTML = rows.length ? rows.map(r => {
+        const extra = r.payload && Object.keys(r.payload).length ? "  " + esc(JSON.stringify(r.payload)).slice(0, 240) : "";
+        return `<div class="logline">${hms(r.ts)}  <b>${esc(r.event).padEnd(16)}</b> ${esc(r.encounter_id || "—").padEnd(18)} ${esc(r.actor || "")} ${esc(r.tool || "")}${extra}</div>`;
+      }).join("") : `<div class="muted text-[13px] p-4">No events${$("filter").value ? " for that encounter" : " yet"}.</div>`;
+    }
+    let t; $("filter").addEventListener("input", () => { clearTimeout(t); t = setTimeout(load, 250); });
+    $("clear").onclick = () => { $("filter").value = ""; load(); };
+    load();
+  </script>
+</body>
+</html>

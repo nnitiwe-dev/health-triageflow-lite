@@ -89,6 +89,115 @@ class AuditLog:
             out.append(d)
         return out
 
+    # ---- read-only views for the history / logs pages ---------------------------------------
+    # All derived from the same append-only table; nothing here writes or mutates.
+
+    @staticmethod
+    def _complaint_from(payload: dict[str, Any]) -> str:
+        """Best-effort presenting complaint out of whatever a payload carried."""
+        enc = payload.get("encounter") if isinstance(payload.get("encounter"), dict) else None
+        if enc and enc.get("presenting_complaint"):
+            return str(enc["presenting_complaint"])
+        return str(payload.get("complaint") or "")
+
+    def _summary_from_trail(self, enc_id: str, trail: list[dict[str, Any]],
+                            agg: dict[str, Any]) -> dict[str, Any]:
+        complaint, proposed, approval, flags = "", None, None, 0
+        for e in trail:
+            p = e.get("payload") or {}
+            if not complaint:
+                complaint = self._complaint_from(p)
+            if p.get("proposed_priority") and e["event"] != "approval":
+                proposed = p["proposed_priority"]
+            if e["event"] == "flag":
+                flags += 1
+            if e["event"] == "approval":                 # the latest one wins (sorted asc)
+                approval = {
+                    "confirmed_priority": p.get("confirmed_priority"),
+                    "proposed_priority": p.get("proposed_priority"),
+                    "decision": p.get("decision"),
+                    "clinician": p.get("clinician") or e.get("actor"),
+                    "reason": p.get("reason") or "",
+                    "ts": e["ts"],
+                }
+        return {
+            "encounter_id": enc_id,
+            "first_ts": agg.get("first_ts"),
+            "last_ts": agg.get("last_ts"),
+            "events": agg.get("n"),
+            "complaint": complaint,
+            "proposed_priority": (approval or {}).get("proposed_priority") or proposed,
+            "confirmed_priority": (approval or {}).get("confirmed_priority"),
+            "clinician": (approval or {}).get("clinician"),
+            "decision": (approval or {}).get("decision"),
+            "reason": (approval or {}).get("reason") or "",
+            "flags": flags,
+            "confirmed": approval is not None,
+        }
+
+    def encounters(self, limit: int = 200) -> list[dict[str, Any]]:
+        """One row per encounter ever seen, newest activity first — the patient-run history."""
+        with sqlite3.connect(self.db_path) as con:
+            con.row_factory = sqlite3.Row
+            groups = con.execute(
+                "SELECT encounter_id, MIN(ts) AS first_ts, MAX(ts) AS last_ts, COUNT(*) AS n "
+                "FROM audit WHERE encounter_id IS NOT NULL AND encounter_id != '' "
+                "GROUP BY encounter_id ORDER BY last_ts DESC LIMIT ?", (int(limit),)).fetchall()
+            out = []
+            for g in groups:
+                rows = con.execute(
+                    "SELECT * FROM audit WHERE encounter_id=? ORDER BY ts ASC",
+                    (g["encounter_id"],)).fetchall()
+                trail = []
+                for r in rows:
+                    d = dict(r)
+                    d["payload"] = json.loads(d["payload"]) if d["payload"] else {}
+                    trail.append(d)
+                out.append(self._summary_from_trail(g["encounter_id"], trail, dict(g)))
+        return out
+
+    def queue_history(self, limit: int = 500) -> list[dict[str, Any]]:
+        """Every confirmed disposition (approval event), newest first — the queue history,
+        separate from the live waiting queue and durable across restarts."""
+        with sqlite3.connect(self.db_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                "SELECT * FROM audit WHERE event='approval' ORDER BY ts DESC LIMIT ?",
+                (int(limit),)).fetchall()
+        out = []
+        for r in rows:
+            p = json.loads(r["payload"]) if r["payload"] else {}
+            out.append({
+                "ts": r["ts"],
+                "encounter_id": r["encounter_id"],
+                "confirmed_priority": p.get("confirmed_priority"),
+                "proposed_priority": p.get("proposed_priority"),
+                "decision": p.get("decision"),
+                "clinician": p.get("clinician") or r["actor"],
+                "reason": p.get("reason") or "",
+            })
+        return out
+
+    def recent_events(self, limit: int = 300,
+                      encounter_id: str | None = None) -> list[dict[str, Any]]:
+        """The raw append-only log, newest first — optionally filtered to one encounter."""
+        q = "SELECT * FROM audit"
+        args: list[Any] = []
+        if encounter_id:
+            q += " WHERE encounter_id=?"
+            args.append(encounter_id)
+        q += " ORDER BY ts DESC LIMIT ?"
+        args.append(int(limit))
+        with sqlite3.connect(self.db_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(q, tuple(args)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(d["payload"]) if d["payload"] else {}
+            out.append(d)
+        return out
+
 
 # Module-level default instance for convenience.
 _default: AuditLog | None = None

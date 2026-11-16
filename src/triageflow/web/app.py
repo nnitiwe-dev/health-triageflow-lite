@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import queue
@@ -19,7 +21,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -28,11 +35,37 @@ from ..agent.graph import ApprovalError, TriageAgent
 from ..agent.llm_backend import get_backend
 from ..agent.mcp_client import InProcessMCP, TriageMCP
 from ..core import sats_rules as R
+from ..core import staff as staff_roster
 from ..core.audit import get_audit
 from ..core.config import settings
 from ..core.explain import TARGET_TEXT
 from ..core.scoring import score_encounter
 from ..data import synthetic
+
+# ---- demo sign-in session -------------------------------------------------------------------
+# A signed cookie carrying only a staff id. This is a DEMO convenience (no passwords, no real
+# auth): it replaces typing a name at the gate. The signature stops the id being trivially
+# edited in the browser; it is not a security boundary. Override the key per deployment.
+_SESSION_COOKIE = "tf_staff"
+_SECRET = os.environ.get("TRIAGEFLOW_SECRET", "triageflow-demo-not-a-secret").encode()
+
+
+def _sign(value: str) -> str:
+    sig = hmac.new(_SECRET, value.encode(), hashlib.sha256).hexdigest()[:16]
+    return f"{value}.{sig}"
+
+
+def _unsign(signed: str | None) -> str | None:
+    if not signed or "." not in signed:
+        return None
+    value, _, sig = signed.rpartition(".")
+    good = hmac.new(_SECRET, value.encode(), hashlib.sha256).hexdigest()[:16]
+    return value if hmac.compare_digest(sig, good) else None
+
+
+def _current_staff(request: Request):
+    """The signed-in staff member for this request, or None."""
+    return staff_roster.get(_unsign(request.cookies.get(_SESSION_COOKIE)))
 
 _HERE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -174,8 +207,17 @@ def _maybe_refresh_model() -> None:
         _rebuild_agent(model)
 
 
+def _nav_ctx(staff, active: str) -> dict[str, Any]:
+    """Shared context for the bottom navbar include."""
+    return {"staff": staff.public() if staff else None, "active": active,
+            "data_region": settings.data_region, "asset_v": _ASSET_V}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    staff = _current_staff(request)
+    if staff is None:                       # demo sign-in gate — pick a staff member first
+        return RedirectResponse("/login", status_code=303)
     await asyncio.to_thread(_maybe_refresh_model)  # resolve active model before paint (non-blocking)
     return templates.TemplateResponse(request, "index.html", {
         "model": _state["model"] or "detecting…",
@@ -183,7 +225,112 @@ async def index(request: Request):
         "servers": _state["servers"],
         "data_region": settings.data_region,
         "asset_v": _ASSET_V,
+        **_nav_ctx(staff, "workspace"),
     })
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    # Already signed in? Go straight to the workspace.
+    if _current_staff(request) is not None:
+        return RedirectResponse("/", status_code=303)
+    bands = [
+        ("RED", "Emergency", R.TARGET_TIME[R.Priority.RED], "Life-threatening — straight to resuscitation."),
+        ("ORANGE", "Very urgent", R.TARGET_TIME[R.Priority.ORANGE], "Could deteriorate fast — seen within minutes."),
+        ("YELLOW", "Urgent", R.TARGET_TIME[R.Priority.YELLOW], "Needs care soon, but stable for now."),
+        ("GREEN", "Routine", R.TARGET_TIME[R.Priority.GREEN], "Stable — safe to wait."),
+        ("BLUE", "Deceased", R.TARGET_TIME[R.Priority.BLUE], "Refer for certification."),
+    ]
+    return templates.TemplateResponse(request, "login.html", {
+        "roster": [s.public() for s in staff_roster.roster()],
+        "bands": bands,
+        "data_region": settings.data_region,
+        "asset_v": _ASSET_V,
+    })
+
+
+@app.get("/api/session")
+async def session_get(request: Request):
+    staff = _current_staff(request)
+    return {"staff": staff.public() if staff else None}
+
+
+@app.post("/api/session/login")
+async def session_login(request: Request):
+    body = await request.json()
+    staff = staff_roster.get((body or {}).get("staff_id"))
+    if staff is None:
+        return JSONResponse({"error": "Unknown staff member."}, status_code=400)
+    resp = JSONResponse({"staff": staff.public()})
+    resp.set_cookie(_SESSION_COOKIE, _sign(staff.id), httponly=True, samesite="lax",
+                    max_age=60 * 60 * 12)   # a shift
+    return resp
+
+
+@app.post("/api/session/logout")
+async def session_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(_SESSION_COOKIE)
+    return resp
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_page(request: Request):
+    staff = _current_staff(request)
+    if staff is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "history.html", _nav_ctx(staff, "history"))
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_page(request: Request):
+    staff = _current_staff(request)
+    if staff is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "logs.html", _nav_ctx(staff, "logs"))
+
+
+@app.get("/system", response_class=HTMLResponse)
+async def system_page(request: Request):
+    staff = _current_staff(request)
+    if staff is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(request, "system.html", {
+        "protocols_dir": str(settings.protocols_dir),
+        "spo2_floor": R.SPO2_SAFETY_FLOOR,
+        "hypo_max": R.HYPOGLYCAEMIA_MAX_MMOL,
+        **_nav_ctx(staff, "system"),
+    })
+
+
+@app.get("/api/history/encounters")
+async def history_encounters(limit: int = 200):
+    return await asyncio.to_thread(audit.encounters, limit)
+
+
+@app.get("/api/history/encounter/{encounter_id}")
+async def history_encounter(encounter_id: str):
+    trail = await asyncio.to_thread(audit.trail, encounter_id)
+    return {"encounter_id": encounter_id, "trail": trail}
+
+
+@app.get("/api/history/queue")
+async def history_queue(limit: int = 500):
+    rows = await asyncio.to_thread(audit.queue_history, limit)
+    # Lightweight aggregates for the "accountability & metrics" strip.
+    by_priority: dict[str, int] = {}
+    overrides = 0
+    for r in rows:
+        p = r.get("confirmed_priority") or "—"
+        by_priority[p] = by_priority.get(p, 0) + 1
+        if r.get("decision") == "override":
+            overrides += 1
+    return {"rows": rows, "total": len(rows), "by_priority": by_priority, "overrides": overrides}
+
+
+@app.get("/api/history/events")
+async def history_events(limit: int = 300, encounter_id: str | None = None):
+    return await asyncio.to_thread(audit.recent_events, limit, encounter_id)
 
 
 @app.get("/api/status")
@@ -428,9 +575,16 @@ async def approve(request: Request):
     run_id = body.get("run_id")
     if not run_id:
         return JSONResponse({"error": "Assess the patient first."}, status_code=400)
+    # The approving clinician is the signed-in staff member; fall back to a posted name so the
+    # API still works without a session (e.g. scripted/CLI use). The gate still requires a name.
+    name = (body.get("clinician_name") or "").strip()
+    if not name:
+        signed_in = _current_staff(request)
+        if signed_in:
+            name = signed_in.name
     decision = {
         "decision": body.get("decision", "approve"),
-        "clinician_name": (body.get("clinician_name") or "").strip(),
+        "clinician_name": name,
         "override_priority": body.get("override_priority"),
         "reason": (body.get("reason") or "").strip(),
         "signs_checked": bool(body.get("signs_checked")),
