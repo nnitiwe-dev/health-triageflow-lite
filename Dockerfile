@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Container image for a public cloud demo (built for linux/amd64, e.g. AWS App Runner).
+# Container image for a public cloud demo (built for linux/amd64, e.g. Amazon ECS Express Mode).
 #
 # The model and the llama.cpp runtime are BAKED IN — not downloaded at start-up — because a
 # cloud instance has no persistent disk and may restart or scale at any time; re-downloading
@@ -84,5 +84,6 @@ EXPOSE 8000
 # The web server answers /api/status as soon as it is up; the model loads in the background.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=10 \
     CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/status', timeout=4).status==200 else 1)"
-# Honour $PORT if the platform sets one (App Runner uses the port configured on the service).
+# Listen on 8000 — the container port ECS Express Mode routes the load balancer to. $PORT is
+# honoured too, so the same image still works on any platform that injects a port.
 CMD ["sh", "-c", "exec python -m triageflow.cli serve --host 0.0.0.0 --port ${PORT:-8000}"]

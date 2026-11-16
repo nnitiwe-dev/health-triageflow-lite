@@ -58,19 +58,22 @@ jobs:
       - name: Provision llama-server, start it, generate, stop
         run: uv run python evals/runtime_smoke.py
 
-  # Build the demo image and deploy to AWS App Runner — only on main, only after every test
-  # and runtime job above has passed, and only once the deployer has opted in by setting the
+  # Build the demo image and deploy to Amazon ECS Express Mode — only on main, only after every
+  # test and runtime job above has passed, and only once the deployer has opted in by setting the
   # repository variable DEPLOY_TO_AWS=true (so this stays off, and free, until AWS is wired up).
-  # One-time AWS setup + the secrets/variables this needs are in docs/DEPLOY_AWS.md.
+  #
+  # Why Express Mode, not App Runner: AWS closed App Runner to new customer accounts on
+  # 2026-04-30, and now points new/migrating users to Amazon ECS Express Mode. Express Mode takes
+  # our ECR image and provisions the Fargate service, Application Load Balancer, public HTTPS URL
+  # and autoscaling for us — the App Runner experience, on a service that still accepts new
+  # accounts. One-time AWS setup + the secrets/variables this needs are in docs/DEPLOY_AWS.md.
   deploy:
-    name: Build & deploy to AWS App Runner
+    name: Build & deploy to Amazon ECS Express Mode
     needs: [test, runtime]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.DEPLOY_TO_AWS == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # to post the result as a commit comment
-    env:
-      SERVICE_ARN: ${{ secrets.APPRUNNER_SERVICE_ARN }}
     steps:
       - uses: actions/checkout@v7
 
@@ -84,23 +87,6 @@ jobs:
       - name: Log in to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Does the App Runner service exist yet?
-        id: svc
-        env:
-          REGION: ${{ vars.AWS_REGION }}
-          NAME: ${{ vars.ECR_REPOSITORY }}
-        run: |
-          set -uo pipefail
-          ARN="$SERVICE_ARN"                          # explicit secret wins, if set
-          if [ -z "$ARN" ]; then                      # else look it up by name (needs
-            ARN=$(aws apprunner list-services --region "$REGION" \
-                  --query "ServiceSummaryList[?ServiceName=='$NAME'].ServiceArn | [0]" \
-                  --output text 2>/dev/null || true)  # apprunner:ListServices; tolerated if denied
-          fi
-          [ "$ARN" = "None" ] && ARN=""
-          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
-          [ -n "$ARN" ] && echo "service exists: $ARN" || echo "service does not exist yet"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -119,71 +105,47 @@ jobs:
           cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
           cache-to: type=inline
 
-      - name: Create the service (if missing) or deploy, then wait for it
+      # First-party AWS action: creates the Express Mode service the first time, then updates it
+      # in place (rolling, zero-downtime) on every later run. It creates the `default` cluster if
+      # missing and provisions/attaches the ALB, HTTPS endpoint and autoscaling. We deploy the
+      # image tagged with this commit's SHA (not :latest) so each run is traceable and the new
+      # tasks always pull the image we just built. Outputs: `endpoint` (public URL), `service-arn`.
+      - name: Deploy to Amazon ECS Express Mode
         id: deploy
-        env:
-          REGION: ${{ vars.AWS_REGION }}
-          NAME: ${{ vars.ECR_REPOSITORY }}
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          ARN: ${{ steps.svc.outputs.arn }}
-        run: |
-          set -uo pipefail
-          if [ -z "$ARN" ]; then
-            echo "no service yet — creating it"
-            ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-            ROLE_ARN="arn:aws:iam::${ACCOUNT}:role/AppRunnerECRAccessRole"
-            SRC="{\"ImageRepository\":{\"ImageIdentifier\":\"${REGISTRY}/${NAME}:latest\",\"ImageRepositoryType\":\"ECR\",\"ImageConfiguration\":{\"Port\":\"8000\"}},\"AutoDeploymentsEnabled\":false,\"AuthenticationConfiguration\":{\"AccessRoleArn\":\"${ROLE_ARN}\"}}"
-            ARN=$(aws apprunner create-service --service-name "$NAME" --region "$REGION" \
-                  --source-configuration "$SRC" \
-                  --instance-configuration '{"Cpu":"4 vCPU","Memory":"12 GB"}' \
-                  --health-check-configuration '{"Protocol":"HTTP","Path":"/api/status","Interval":20,"Timeout":5,"HealthyThreshold":1,"UnhealthyThreshold":5}' \
-                  --query 'Service.ServiceArn' --output text) || exit 1
-            OP="create"
-          else
-            echo "service exists — deploying the new image"
-            OP=$(aws apprunner start-deployment --service-arn "$ARN" --query OperationId --output text) || exit 1
-          fi
-          URL=$(aws apprunner describe-service --service-arn "$ARN" --query 'Service.ServiceUrl' --output text)
-          sleep 20
-          STATUS=UNKNOWN
-          for i in $(seq 1 60); do                   # first creation pulls ~5 GB + loads the model
-            STATUS=$(aws apprunner describe-service --service-arn "$ARN" --query 'Service.Status' --output text)
-            echo "[$i] status=$STATUS"
-            case "$STATUS" in
-              RUNNING) break ;;
-              *FAILED*|PAUSED|DELETE*) break ;;
-            esac
-            sleep 15
-          done
-          {
-            echo "deployed=true"
-            echo "status=$STATUS"
-            echo "url=https://$URL"
-            echo "operation=$OP"
-          } >> "$GITHUB_OUTPUT"
+        uses: aws-actions/amazon-ecs-deploy-express-service@v1
+        with:
+          service-name: ${{ vars.ECR_REPOSITORY }}
+          image: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+          execution-role-arn: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          infrastructure-role-arn: ${{ vars.ECS_INFRASTRUCTURE_ROLE_ARN }}
+          container-port: "8000"
+          health-check-path: /api/status
+          cpu: "4096"              # 4 vCPU (CPU units)
+          memory: "12288"          # 12 GB in MiB — the 7B model needs it
+          min-task-count: "1"      # single instance: cheapest, plenty for a demo
+          max-task-count: "1"
 
       - name: Comment the result on the commit
         if: always()
         uses: actions/github-script@v7
         env:
-          DEPLOYED: ${{ steps.deploy.outputs.deployed }}
-          STATUS: ${{ steps.deploy.outputs.status }}
-          URL: ${{ steps.deploy.outputs.url }}
-          OPERATION: ${{ steps.deploy.outputs.operation }}
+          ENDPOINT: ${{ steps.deploy.outputs.endpoint }}
+          SERVICE_ARN: ${{ steps.deploy.outputs.service-arn }}
           DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
         with:
           script: |
-            const { DEPLOYED, STATUS, URL, OPERATION, DEPLOY_OUTCOME } = process.env;
+            const { ENDPOINT, SERVICE_ARN, DEPLOY_OUTCOME } = process.env;
             const sha = context.sha.slice(0, 7);
             let body;
-            if (DEPLOYED === 'true') {
-              const ok = STATUS === 'RUNNING';
-              body = `### ${ok ? '✅' : '⏳'} App Runner deploy — \`${STATUS}\`\n\n`
-                   + `**Live demo:** ${URL}\n\nImage \`${sha}\` · deployment \`${OPERATION}\``
-                   + (ok ? '' : `\n\n_Still rolling out — give it a minute, then refresh._`);
+            if (DEPLOY_OUTCOME === 'success' && ENDPOINT) {
+              body = `### ✅ ECS Express Mode deploy — \`${sha}\`\n\n`
+                   + `**Live demo:** ${ENDPOINT}\n\n`
+                   + `_Priority scoring, the approval gate and the audit trail work immediately; `
+                   + `the 7B model finishes loading a minute or two after the task starts._`;
             } else if (DEPLOY_OUTCOME === 'failure') {
-              body = `### ❌ App Runner deploy failed\n\nImage \`${sha}\` was pushed, but `
-                   + `\`start-deployment\` or the rollout did not succeed — see the run logs.`;
+              body = `### ❌ ECS Express Mode deploy failed for \`${sha}\`\n\n`
+                   + `The image was pushed to ECR, but creating/updating the Express service did `
+                   + `not succeed — see the run logs.`;
             } else {
               body = `### ⚠️ Deploy step did not report a result for \`${sha}\`\n\nSee the run logs.`;
             }

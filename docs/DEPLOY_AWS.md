@@ -1,26 +1,41 @@
-# Deploy the demo to AWS App Runner (with CI/CD)
+# Deploy the demo to AWS (Amazon ECS Express Mode, with CI/CD)
 
-This runs TriageFlow Lite as a public HTTPS demo on **AWS App Runner**, redeployed
+This runs TriageFlow Lite as a public HTTPS demo on **Amazon ECS Express Mode**, redeployed
 automatically every time the tests pass on `main`.
 
-**What you get:** a public `https://<id>.us-east-1.awsapprunner.com` URL, TLS included, the
-7B model baked into the image so there is no cold-start download.
+**What you get:** a public `https://<service>.ecs.us-east-1.on.aws` URL, TLS included, an
+Application Load Balancer and autoscaling provisioned for you, and the 7B model baked into the
+image so there is no cold-start download.
+
+> ### Why not App Runner?
+> AWS **closed App Runner to new customer accounts on 2026-04-30**. Existing App Runner
+> customers keep running, but a new account (like this one) gets
+> `InvalidRequestException: Account … can't create new App Runner services` no matter what IAM
+> permissions it has — it is an account-level restriction, not a policy gap. AWS now points new
+> and migrating users to **ECS Express Mode**, which gives the same "hand it an image, get a URL"
+> experience on top of Fargate + an ALB. This guide (and the CI/CD pipeline) use Express Mode.
+> See the [App Runner availability change](https://docs.aws.amazon.com/apprunner/latest/dg/apprunner-availability-change.html)
+> and [Express Mode docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-getting-started.html).
 
 **Honest notes before you start**
 
-- **Cost.** The 7B model needs App Runner's largest size (**4 vCPU / 12 GB**). Running it
-  continuously is roughly **US$5–10 per day**. **Pause the service when you are not demoing**
-  (one command, below) and it costs almost nothing. Check the
-  [App Runner pricing page](https://aws.amazon.com/apprunner/pricing/) for current rates.
+- **Cost.** The 7B model needs **4 vCPU / 12 GB** of Fargate, plus a small always-on ALB.
+  Running it continuously is roughly **US$5–12 per day**. **Scale the service to zero tasks when
+  you are not demoing** (one command, below) and you pay only the ALB (a few cents an hour).
+  Check [Fargate pricing](https://aws.amazon.com/fargate/pricing/) for current rates.
 - **Data residency.** This public demo runs inference **on AWS**, on **synthetic data only**.
   The "patient data never leaves the facility" property in the README is for running the same
   image on a clinic's own hardware — it is not what the public cloud demo demonstrates. The
   UI's data chip says "cloud demo · synthetic data only" so nobody is misled.
-- **Region.** App Runner is not available in Cape Town (`af-south-1`). This guide uses
-  **`us-east-1`**, the region you chose.
+- **Region & VPC.** This guide uses **`us-east-1`**, the region you chose. Express Mode puts the
+  load balancer in your account's **default VPC** with public subnets; new AWS accounts have one
+  automatically. If yours was deleted, run `aws ec2 create-default-vpc` first (or pass your own
+  `--subnets`).
 
-You do the one-time setup in phases A–C. After that, `git push` to `main` is the whole
-deploy workflow.
+You do the one-time setup in phases A–C. After that, `git push` to `main` is the whole deploy
+workflow: CI builds the image, pushes it to ECR, and the first-party
+[`aws-actions/amazon-ecs-deploy-express-service`](https://github.com/aws-actions/amazon-ecs-deploy-express-service)
+action **creates the service the first time and updates it in place on every later push**.
 
 ---
 
@@ -28,8 +43,8 @@ deploy workflow.
 
 > **Run the one-time setup (Phases A–B) as your normal console identity**, which already has
 > admin rights — in AWS CloudShell that is automatic. The `triageflow-ci` user you created is
-> deliberately minimal (push images + deploy only); it **cannot** create the repository or the
-> service. If you ran `aws configure` with the CI user's keys in CloudShell, revert to your
+> deliberately minimal (push images + deploy only); it **cannot** create the ECR repository or
+> the IAM roles. If you ran `aws configure` with the CI user's keys in CloudShell, revert to your
 > console identity first:
 >
 > ```bash
@@ -38,15 +53,6 @@ deploy workflow.
 > ```
 >
 > The CI user's keys belong in **GitHub secrets**, not in CloudShell.
-
-
-Install and sign in:
-
-```bash
-aws --version          # AWS CLI v2
-docker --version       # only needed for the one-time first push in Phase A
-aws configure          # use the IAM user's access key, region us-east-1
-```
 
 Set a couple of shell variables used throughout:
 
@@ -61,64 +67,57 @@ export ECR_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
 
 ## Phase A — Create the image registry
 
-App Runner deploys *from* an image, so a registry must exist. This is the only AWS resource
-you create by hand; **CI builds and pushes the image itself** (a 5+ GB model image won't build
-in CloudShell, and you shouldn't have to build it locally).
+Express Mode deploys *from* an image, so a registry must exist. This is the only AWS resource
+you create by hand for images; **CI builds and pushes the image itself** (a 5+ GB model image
+won't build in CloudShell, and you shouldn't have to build it locally).
 
 ```bash
 aws ecr create-repository --repository-name $ECR_REPO --region $AWS_REGION
 ```
 
-Now wire up GitHub so the first push builds the image **(do Phase C's secrets/variables now,
-but leave `APPRUNNER_SERVICE_ARN` unset)**, then push to `main`. The `deploy` job builds the
-image, pushes it to ECR as `:latest`, and — because no service exists yet — prints a note and
-stops without deploying. You now have an image to create the service from.
+## Phase B — Create the two IAM roles Express Mode needs
 
-> Prefer to build the very first image yourself instead? With Docker and ~15 GB free disk:
-> `docker build --platform linux/amd64 -t $ECR_URI:latest . && docker push $ECR_URI:latest`
-> (after `aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com`).
-> To test the container cheaply first, build the tiny model:
-> `docker build --platform linux/amd64 --build-arg MODEL_REPO=bartowski/Qwen2.5-0.5B-Instruct-GGUF --build-arg MODEL_FILE=Qwen2.5-0.5B-Instruct-Q4_K_M.gguf --build-arg MODEL_ID=qwen2.5-0.5b-instruct-q4 -t test .`
-> then `docker run -p 8000:8000 test` and open <http://127.0.0.1:8000>.
+Express Mode uses two roles. These are **standard, named roles** — create them once as your
+console identity and both the CI action and AWS reuse them. (Full detail in the
+[AWS getting-started guide](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-getting-started.html).)
 
-## Phase B — Create the App Runner service
-
-Easiest in the **console** (it offers to create the ECR-access role for you); the CLI
-equivalent is at the end.
-
-1. Open **App Runner → Create service**.
-2. **Source:** Container registry → Amazon ECR. **Browse** to `health-triageflow-lite:latest`.
-3. **Deployment settings:** choose **Manual** (CI triggers each deploy). For the ECR access
-   role, let App Runner **create a new service role** (`AppRunnerECRAccessRole`).
-4. **Configure service:**
-   - **CPU:** 4 vCPU · **Memory:** 12 GB (required for the 7B model).
-   - **Port:** `8000`.
-   - **Health check:** Protocol **HTTP**, Path **`/api/status`**. Set the healthy threshold to
-     a few retries and a longer interval — the web server is healthy within seconds, and the
-     model keeps loading in the background after that.
-   - **Environment variables** (optional — the image already sets good defaults): you can add
-     `TRIAGEFLOW_DATA_REGION` to change the data-chip label, or `TRIAGEFLOW_NO_LLM=1` to run a
-     model-free (and much cheaper, 1 vCPU/2 GB) deterministic-only demo.
-   - **Auto scaling:** min 1 / max 1 is plenty for a demo and avoids paying for extra instances.
-5. **Create & deploy.** When it is ready, note the **Default domain** (your public URL) and the
-   **Service ARN** (`arn:aws:apprunner:us-east-1:…:service/health-triageflow-lite/…`).
-
-Open the URL. The priority scoring, approval gate and audit trail work immediately; the model
-finishes loading within a minute or two and the banner clears.
-
-**Pause it when you are done** (stops the bill; resume in seconds for the next demo):
+| Role | What it does | Managed policy |
+|------|--------------|----------------|
+| `ecsTaskExecutionRole` | lets ECS pull the image from ECR and write CloudWatch logs | `AmazonECSTaskExecutionRolePolicy` |
+| `ecsInfrastructureRoleForExpressServices` | lets ECS create/manage the ALB, target groups, autoscaling | `AmazonECSInfrastructureRoleforExpressGatewayServices` |
 
 ```bash
-aws apprunner pause-service  --service-arn <SERVICE_ARN>
-aws apprunner resume-service --service-arn <SERVICE_ARN>
+# Task execution role (trusted by ECS tasks)
+aws iam create-role --role-name ecsTaskExecutionRole \
+  --assume-role-policy-document '{
+    "Version":"2012-10-17",
+    "Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]
+  }'
+aws iam attach-role-policy --role-name ecsTaskExecutionRole \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+# Infrastructure role (trusted by the ECS service)
+aws iam create-role --role-name ecsInfrastructureRoleForExpressServices \
+  --assume-role-policy-document '{
+    "Version":"2012-10-17",
+    "Statement":[{"Sid":"AllowAccessInfrastructureForECSExpressServices","Effect":"Allow","Principal":{"Service":"ecs.amazonaws.com"},"Action":"sts:AssumeRole"}]
+  }'
+aws iam attach-role-policy --role-name ecsInfrastructureRoleForExpressServices \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices
 ```
+
+> IAM roles are eventually consistent — if the very first deploy fails with "Unable to assume
+> the … role" seconds after you create these, wait a minute and re-run it.
+
+That is all the hand-setup there is: **you do not create the service by hand.** CI's deploy
+action creates it on the first push to `main` and updates it afterwards.
 
 ---
 
 ## Phase C — Wire up CI/CD
 
-**1. Create a least-privilege IAM policy** for the deploy user (push to this one repo, deploy
-this one service). Save as `deploy-policy.json`, filling in your account id and service ARN:
+**1. Create a least-privilege IAM policy** for the deploy user (push to this one repo; manage the
+Express service; pass only the two roles above). Save as `deploy-policy.json`:
 
 ```json
 {
@@ -129,32 +128,44 @@ this one service). Save as `deploy-policy.json`, filling in your account id and 
       "Action": ["ecr:BatchCheckLayerAvailability","ecr:GetDownloadUrlForLayer","ecr:BatchGetImage",
                  "ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:PutImage"],
       "Resource": "arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/health-triageflow-lite" },
-    { "Sid": "AppRunnerManage", "Effect": "Allow",
-      "Action": ["apprunner:CreateService","apprunner:StartDeployment","apprunner:DescribeService","apprunner:TagResource"],
-      "Resource": "arn:aws:apprunner:us-east-1:ACCOUNT_ID:service/health-triageflow-lite/*" },
-    { "Sid": "AppRunnerFind", "Effect": "Allow", "Action": "apprunner:ListServices", "Resource": "*" },
-    { "Sid": "PassEcrAccessRole", "Effect": "Allow", "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::ACCOUNT_ID:role/AppRunnerECRAccessRole" },
-    { "Sid": "AppRunnerServiceLinkedRole", "Effect": "Allow", "Action": "iam:CreateServiceLinkedRole",
-      "Resource": "arn:aws:iam::ACCOUNT_ID:role/aws-service-role/apprunner.amazonaws.com/*",
-      "Condition": { "StringEquals": { "iam:AWSServiceName": "apprunner.amazonaws.com" } } }
+    { "Sid": "EcsExpressDeploy", "Effect": "Allow",
+      "Action": ["ecs:CreateCluster","ecs:RegisterTaskDefinition",
+                 "ecs:CreateExpressGatewayService","ecs:UpdateExpressGatewayService","ecs:DescribeExpressGatewayService",
+                 "ecs:DescribeClusters","ecs:DescribeServices","ecs:ListServiceDeployments","ecs:DescribeServiceDeployments",
+                 "ecs:TagResource","ecs:UntagResource"],
+      "Resource": "*" },
+    { "Sid": "PassEcsRoles", "Effect": "Allow", "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+        "arn:aws:iam::ACCOUNT_ID:role/ecsInfrastructureRoleForExpressServices"
+      ] }
   ]
 }
 ```
 
-> This is the **full-automation** policy: CI builds, and **creates the service if it's missing**,
-> then deploys — no manual steps and no `APPRUNNER_SERVICE_ARN` secret. The extra permissions are
-> scoped as tightly as AWS allows:
-> - `CreateService`/`StartDeployment`/`DescribeService` only on `service/health-triageflow-lite/*`;
-> - `iam:PassRole` only for the `AppRunnerECRAccessRole` (scoped to that one role — it cannot pass any other);
-> - `iam:CreateServiceLinkedRole` only for App Runner's own service-linked role.
-> `ListServices` is read-only but account-wide (it has no resource scoping). The CI user still
-> cannot touch any other service, repo, or role. If you'd rather keep CI minimal and create the
-> service yourself, drop `CreateService`, `PassRole` and `CreateServiceLinkedRole` and use the
-> one-time CLI below instead.
+> Scoping notes:
+> - **ECR push** is pinned to the one repository.
+> - **The ECS Express actions** need `Resource: "*"` — these API calls don't support resource-level
+>   scoping, and the service name is fixed in the workflow, so CI can only touch the one service it
+>   names. This matches AWS's own documented policy for the deploy action.
+> - **`iam:PassRole`** is pinned to the **two roles above and nothing else** — CI cannot pass any
+>   other role (this is the privilege-escalation surface, so it is the one that matters most).
+>   Unlike the old App Runner policy, there is **no `iam:PassedToService` condition** — resource
+>   scoping is sufficient, and the condition is what silently broke the earlier App Runner deploy.
+>
+> If you already have the `triageflow-ci-deploy` policy from the App Runner attempt, replace it in
+> place (keeps the same ARN, no re-attach needed):
+>
+> ```bash
+> aws iam create-policy-version \
+>   --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/triageflow-ci-deploy \
+>   --policy-document file://deploy-policy.json --set-as-default
+> ```
+> (If that errors with *"cannot exceed 5 versions"*, delete a non-default version first:
+> `aws iam list-policy-versions --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/triageflow-ci-deploy`
+> then `aws iam delete-policy-version … --version-id vN`.)
 
-Attach it to the IAM user whose access key you will give GitHub (create a dedicated user such
-as `triageflow-ci` — not your personal admin user):
+First time only — create the policy and the user, and attach them:
 
 ```bash
 aws iam create-policy --policy-name triageflow-ci-deploy --policy-document file://deploy-policy.json
@@ -169,106 +180,101 @@ aws iam create-access-key --user-name triageflow-ci   # note the AccessKeyId + S
 |------|------|-------|
 | Secret | `AWS_ACCESS_KEY_ID` | the CI user's access key id |
 | Secret | `AWS_SECRET_ACCESS_KEY` | the CI user's secret |
-| Secret | `APPRUNNER_SERVICE_ARN` | the service ARN from Phase B |
 | Variable | `AWS_REGION` | `us-east-1` |
 | Variable | `ECR_REPOSITORY` | `health-triageflow-lite` |
+| Variable | `ECS_EXECUTION_ROLE_ARN` | `arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole` |
+| Variable | `ECS_INFRASTRUCTURE_ROLE_ARN` | `arn:aws:iam::ACCOUNT_ID:role/ecsInfrastructureRoleForExpressServices` |
 | Variable | `DEPLOY_TO_AWS` | `true` |
 
+The role ARNs are **not secrets** (they're just identifiers) — set them with the GitHub CLI if
+you prefer:
+
+```bash
+gh variable set ECS_EXECUTION_ROLE_ARN      --body "arn:aws:iam::$ACCOUNT_ID:role/ecsTaskExecutionRole"
+gh variable set ECS_INFRASTRUCTURE_ROLE_ARN --body "arn:aws:iam::$ACCOUNT_ID:role/ecsInfrastructureRoleForExpressServices"
+```
+
+> `APPRUNNER_SERVICE_ARN` is no longer used — you can delete that secret if it's still there.
+
 The `deploy` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) stays **skipped**
-until `DEPLOY_TO_AWS` is `true`, so adding the Docker files changed nothing and cost nothing
-until this step. The job also runs **only on `main`** and **only after** every test and
+until `DEPLOY_TO_AWS` is `true`, runs **only on `main`**, and **only after** every test and
 runtime job passes.
 
-You will set these in two passes: **before Phase A's first push**, add everything *except*
-`APPRUNNER_SERVICE_ARN` (so CI can build the first image); **after Phase B** creates the
-service, add `APPRUNNER_SERVICE_ARN` too.
+**3. Deploy** by pushing to `main` (or re-running the latest `main` workflow). The job builds the
+image, pushes it to ECR reusing the unchanged model layer, then the deploy action creates the
+Express service on the first run (provisioning the ALB + URL — this first time takes several
+minutes) and updates it in place every run after. When it finishes it posts a commit comment with
+the live `https://…ecs.us-east-1.on.aws` URL.
 
-**3. Deploy** by pushing to `main` (or re-running the latest `main` workflow). With the ARN
-set, the job builds the image, pushes it to ECR reusing the unchanged model layer, and calls
-`apprunner start-deployment`. App Runner rolls out the new image with no downtime.
+Open the URL. The priority scoring, approval gate and audit trail work immediately; the 7B model
+finishes loading a minute or two after the task starts, and the banner clears.
+
+---
+
+## Managing the running service
+
+Find the service ARN and URL:
+
+```bash
+aws ecs list-express-gateway-services --region $AWS_REGION    # lists ARNs
+SERVICE_ARN=<paste the one named health-triageflow-lite>
+aws ecs describe-express-gateway-service --service-arn "$SERVICE_ARN" \
+  --query '{status:status.statusCode,url:targetConfiguration.ingressPaths[0].endpoint}'
+```
+
+**Stop paying when you're not demoing** — scale to zero tasks (the ALB stays, so the URL is
+preserved; a few cents an hour). Resume by scaling back to 1:
+
+```bash
+# pause (0 tasks)
+aws ecs update-express-gateway-service --service-arn "$SERVICE_ARN" \
+  --scaling-target '{"minTaskCount":0,"maxTaskCount":0}' --monitor-resources TEXT-ONLY
+# resume (1 task)
+aws ecs update-express-gateway-service --service-arn "$SERVICE_ARN" \
+  --scaling-target '{"minTaskCount":1,"maxTaskCount":1}' --monitor-resources TEXT-ONLY
+```
+
+To delete it entirely (removes the ALB and URL):
+
+```bash
+aws ecs delete-express-gateway-service --service-arn "$SERVICE_ARN" --monitor-resources TEXT-ONLY
+```
 
 ---
 
 ## Changing the model later
 
-Edit the `ARG` defaults at the top of the [`Dockerfile`](../Dockerfile) (or pass
-`--build-arg`), and in App Runner set the size to match:
+Edit the `ARG` defaults at the top of the [`Dockerfile`](../Dockerfile) (or pass `--build-arg`),
+and set the matching size in the workflow's deploy step (`cpu` in CPU units, `memory` in MiB):
 
-| Model | `MODEL_REPO` / `MODEL_FILE` / `MODEL_ID` | App Runner size |
-|-------|------------------------------------------|-----------------|
-| 7B (current) | `bartowski/Qwen2.5-7B-Instruct-GGUF` · `Qwen2.5-7B-Instruct-Q4_K_M.gguf` · `qwen2.5-7b-instruct-q4` | 4 vCPU / 12 GB |
-| 3B | `bartowski/Qwen2.5-3B-Instruct-GGUF` · `Qwen2.5-3B-Instruct-Q4_K_M.gguf` · `qwen2.5-3b-instruct-q4` | 2 vCPU / 4 GB |
-| 0.5B | `bartowski/Qwen2.5-0.5B-Instruct-GGUF` · `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` · `qwen2.5-0.5b-instruct-q4` | 1 vCPU / 2 GB |
+| Model | `MODEL_REPO` / `MODEL_FILE` / `MODEL_ID` | `cpu` / `memory` |
+|-------|------------------------------------------|------------------|
+| 7B (current) | `bartowski/Qwen2.5-7B-Instruct-GGUF` · `Qwen2.5-7B-Instruct-Q4_K_M.gguf` · `qwen2.5-7b-instruct-q4` | `4096` / `12288` (4 vCPU / 12 GB) |
+| 3B | `bartowski/Qwen2.5-3B-Instruct-GGUF` · `Qwen2.5-3B-Instruct-Q4_K_M.gguf` · `qwen2.5-3b-instruct-q4` | `2048` / `4096` (2 vCPU / 4 GB) |
+| 0.5B | `bartowski/Qwen2.5-0.5B-Instruct-GGUF` · `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` · `qwen2.5-0.5b-instruct-q4` | `1024` / `2048` (1 vCPU / 2 GB) |
 
-Set `TRIAGEFLOW_NO_LLM=1` as a service env var for a deterministic-only demo (no model, 1 vCPU
-/ 2 GB, cheapest) — scoring, the gate and the audit trail all still work; only free-text sign
-suggestions are off.
+For a deterministic-only demo (no model — scoring, the gate and the audit trail all still work,
+only free-text sign suggestions are off), add `TRIAGEFLOW_NO_LLM=1` as a container environment
+variable (via the action's `environment-variables` input) and drop to `1024`/`2048`.
 
 ---
 
 ## Troubleshooting
 
 - **Deploy job was skipped** — `DEPLOY_TO_AWS` is not `true`, or the push was not to `main`.
-- **Service stuck "Operation in progress" / rollback** — open the App Runner **Application
-  logs**. A health check failing usually means the port (8000) or health path (`/api/status`)
-  is wrong, or the size is too small for the model (the 7B needs 12 GB).
-- **First request slow** — the model loads in the background after the container starts;
-  priorities work immediately, suggestions appear once it is warm.
+- **`Account … can't create new App Runner services`** — you're on an old App Runner workflow;
+  this guide/pipeline no longer use App Runner (see the top). Pull `main` so you have the
+  Express Mode `deploy` job.
+- **`not authorized to perform: iam:PassRole`** — the CI policy's `PassEcsRoles` statement is
+  missing or names the wrong role ARNs. Re-apply `deploy-policy.json` (step C.1). It must list
+  **both** `ecsTaskExecutionRole` and `ecsInfrastructureRoleForExpressServices`, with **no**
+  `iam:PassedToService` condition.
+- **"Unable to assume role" right after creating the roles** — IAM eventual consistency; wait a
+  minute and re-run the deploy.
+- **No default VPC** — `aws ec2 create-default-vpc`, or pass your own `--subnets` / `subnets`.
+- **Service never goes healthy** — the ALB health check hits `/api/status` on port `8000`; both
+  are set in the workflow. Check the task's CloudWatch logs (log group is created automatically).
+  The web server answers in seconds; the model keeps loading in the background after that, so a
+  slow first *suggestion* is normal, a failing *health check* is not.
 - **`docker build` fails downloading the model** — a Hugging Face hiccup; re-run. The URL and
   filename are pinned in the Dockerfile.
-
-### Create the service entirely from the CLI
-
-Run these **as your console identity** (they create an IAM role and an App Runner service — the
-least-privilege `triageflow-ci` user cannot, by design). Variables from "Before you begin"
-(`$ACCOUNT_ID`, `$AWS_REGION`, `$ECR_URI`) must be set.
-
-**1. The ECR-access role App Runner uses to pull the image** (one-time; skip if it exists):
-
-```bash
-cat > /tmp/apprunner-trust.json <<'JSON'
-{ "Version": "2012-10-17",
-  "Statement": [ { "Effect": "Allow",
-    "Principal": { "Service": "build.apprunner.amazonaws.com" },
-    "Action": "sts:AssumeRole" } ] }
-JSON
-
-aws iam create-role --role-name AppRunnerECRAccessRole \
-  --assume-role-policy-document file:///tmp/apprunner-trust.json
-aws iam attach-role-policy --role-name AppRunnerECRAccessRole \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
-```
-
-**2. Create the service** from the image CI already pushed:
-
-```bash
-aws apprunner create-service \
-  --service-name health-triageflow-lite --region "$AWS_REGION" \
-  --source-configuration '{
-    "ImageRepository": {
-      "ImageIdentifier": "'"$ECR_URI"':latest",
-      "ImageRepositoryType": "ECR",
-      "ImageConfiguration": { "Port": "8000" }
-    },
-    "AutoDeploymentsEnabled": false,
-    "AuthenticationConfiguration": { "AccessRoleArn": "arn:aws:iam::'"$ACCOUNT_ID"':role/AppRunnerECRAccessRole" }
-  }' \
-  --instance-configuration '{ "Cpu": "4 vCPU", "Memory": "12 GB" }' \
-  --health-check-configuration '{ "Protocol": "HTTP", "Path": "/api/status", "Interval": 20, "Timeout": 5, "HealthyThreshold": 1, "UnhealthyThreshold": 5 }'
-```
-
-**3. Get the public URL** (and confirm it is running):
-
-```bash
-aws apprunner list-services --region "$AWS_REGION" \
-  --query "ServiceSummaryList[?ServiceName=='health-triageflow-lite'].[Status,ServiceUrl]" --output table
-```
-
-Prepend `https://` to `ServiceUrl` to open it. After this exists, CI auto-deploys to it on
-every push (via `apprunner:ListServices`, or set `APPRUNNER_SERVICE_ARN`).
-
-> **The one thing CI still can't do: create the ECR-access role.** Automating that would need
-> `iam:CreateRole` on the CI user, which is effectively admin — so step 1 above (creating
-> `AppRunnerECRAccessRole`) is a one-time command you run as your console identity. After that,
-> with the full-automation policy, CI creates the service on the first push and deploys on every
-> push, with no further manual steps.
