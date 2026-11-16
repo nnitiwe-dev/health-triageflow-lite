@@ -134,8 +134,7 @@ this one service). Save as `deploy-policy.json`, filling in your account id and 
       "Resource": "arn:aws:apprunner:us-east-1:ACCOUNT_ID:service/health-triageflow-lite/*" },
     { "Sid": "AppRunnerFind", "Effect": "Allow", "Action": "apprunner:ListServices", "Resource": "*" },
     { "Sid": "PassEcrAccessRole", "Effect": "Allow", "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::ACCOUNT_ID:role/AppRunnerECRAccessRole",
-      "Condition": { "StringEquals": { "iam:PassedToService": "build.apprunner.amazonaws.com" } } },
+      "Resource": "arn:aws:iam::ACCOUNT_ID:role/AppRunnerECRAccessRole" },
     { "Sid": "AppRunnerServiceLinkedRole", "Effect": "Allow", "Action": "iam:CreateServiceLinkedRole",
       "Resource": "arn:aws:iam::ACCOUNT_ID:role/aws-service-role/apprunner.amazonaws.com/*",
       "Condition": { "StringEquals": { "iam:AWSServiceName": "apprunner.amazonaws.com" } } }
@@ -147,7 +146,7 @@ this one service). Save as `deploy-policy.json`, filling in your account id and 
 > then deploys — no manual steps and no `APPRUNNER_SERVICE_ARN` secret. The extra permissions are
 > scoped as tightly as AWS allows:
 > - `CreateService`/`StartDeployment`/`DescribeService` only on `service/health-triageflow-lite/*`;
-> - `iam:PassRole` only for the `AppRunnerECRAccessRole`, and only when passed **to App Runner**;
+> - `iam:PassRole` only for the `AppRunnerECRAccessRole` (scoped to that one role — it cannot pass any other);
 > - `iam:CreateServiceLinkedRole` only for App Runner's own service-linked role.
 > `ListServices` is read-only but account-wide (it has no resource scoping). The CI user still
 > cannot touch any other service, repo, or role. If you'd rather keep CI minimal and create the
